@@ -42,9 +42,6 @@ pub struct CanvasWindow {
     /// Snapshot of canvas position when the current animation began.
     pub(crate) anim_start_x: f64,
     pub(crate) anim_start_y: f64,
-    /// Last known canvas position while in tree view (free-form). Restored on re-entry.
-    pub tree_saved_x: Option<f64>,
-    pub tree_saved_y: Option<f64>,
     /// None means this window is a tree root.
     pub parent_id: Option<u32>,
     /// IDs of direct children, in open order.
