@@ -46,6 +46,9 @@ pub struct CanvasWindow {
     pub parent_id: Option<u32>,
     /// IDs of direct children, in open order.
     pub children: Vec<u32>,
+    /// Manually saved positions for TreeView mode.
+    pub tree_x: Option<f64>,
+    pub tree_y: Option<f64>,
 }
 
 pub struct Treewm {
@@ -70,7 +73,9 @@ pub struct Treewm {
     pub next_window_id: u32,
     /// The ID of the window that currently holds keyboard focus.
     pub focused_window_id: Option<u32>,
+    pub tiling_root_id: Option<u32>,
     pub view_mode: ViewMode,
+    pub zoom: f64,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -119,7 +124,9 @@ impl Treewm {
             anim_start: None,
             next_window_id: 0,
             focused_window_id: None,
+            tiling_root_id: None,
             view_mode: ViewMode::Tiling,
+            zoom: 1.0,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -241,49 +248,11 @@ impl Treewm {
     }
 
     fn layout_tiling(&mut self) {
-        let Some(focused_id) = self.focused_window_id else { return };
+        let Some(tiling_root) = self.tiling_root_id.or(self.focused_window_id) else { return };
         let (w, h) = self.output_size();
 
-        let children_ids: Vec<u32> = self
-            .windows
-            .iter()
-            .find(|cw| cw.id == focused_id)
-            .map(|cw| cw.children.clone())
-            .unwrap_or_default();
-
-        let has_children = !children_ids.is_empty();
-        let full_w = w as i32;
-        let full_h = h as i32;
-        let left_w = full_w / 2;
-        let right_w = full_w - left_w;
-        let n = children_ids.len().max(1);
-        let child_h = full_h / n as i32;
-
-        // Collect geometry for each window (two-pass to satisfy borrow checker).
-        struct Slot {
-            target_x: f64,
-            target_y: f64,
-            size: Option<(i32, i32)>,
-        }
-        let slots: Vec<(u32, Slot)> = self
-            .windows
-            .iter()
-            .map(|cw| {
-                let slot = if cw.id == focused_id {
-                    let w = if has_children { left_w } else { full_w };
-                    Slot { target_x: 0.0, target_y: 0.0, size: Some((w, full_h)) }
-                } else if let Some(idx) = children_ids.iter().position(|&c| c == cw.id) {
-                    Slot {
-                        target_x: left_w as f64,
-                        target_y: (child_h * idx as i32) as f64,
-                        size: Some((right_w, child_h)),
-                    }
-                } else {
-                    Slot { target_x: -10_000.0, target_y: 0.0, size: None }
-                };
-                (cw.id, slot)
-            })
-            .collect();
+        let mut slots = HashMap::new();
+        self.layout_node_bsp(tiling_root, (0.0, 0.0, w, h), &mut slots);
 
         self.viewport_target_x = 0.0;
         self.viewport_target_y = 0.0;
@@ -291,7 +260,7 @@ impl Treewm {
         // Resize windows (two-pass: collect toplevels, then configure).
         let resize_ops: Vec<(u32, i32, i32)> = slots
             .iter()
-            .filter_map(|(id, slot)| slot.size.map(|(sw, sh)| (*id, sw, sh)))
+            .map(|(&id, &(_, _, sw, sh))| (id, sw as i32, sh as i32))
             .collect();
         for (id, sw, sh) in resize_ops {
             let toplevel = self
@@ -306,14 +275,52 @@ impl Treewm {
         }
 
         // Set animation targets.
-        for (id, slot) in slots {
-            if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
-                cw.target_x = slot.target_x;
-                cw.target_y = slot.target_y;
+        for cw in &mut self.windows {
+            if let Some(&(tx, ty, _, _)) = slots.get(&cw.id) {
+                cw.target_x = tx;
+                cw.target_y = ty;
+            } else {
+                cw.target_x = -10_000.0;
+                cw.target_y = 0.0;
             }
         }
 
         self.begin_animation();
+    }
+
+    fn layout_node_bsp(&self, node_id: u32, rect: (f64, f64, f64, f64), out: &mut HashMap<u32, (f64, f64, f64, f64)>) {
+        let children = self
+            .windows
+            .iter()
+            .find(|cw| cw.id == node_id)
+            .map(|cw| cw.children.clone())
+            .unwrap_or_default();
+
+        if children.is_empty() {
+            out.insert(node_id, rect);
+        } else {
+            let (x, y, w, h) = rect;
+            let left_w = w / 2.0;
+            let right_w = w - left_w;
+            out.insert(node_id, (x, y, left_w, h));
+            self.layout_siblings_bsp(&children, (x + left_w, y, right_w, h), out);
+        }
+    }
+
+    fn layout_siblings_bsp(&self, siblings: &[u32], rect: (f64, f64, f64, f64), out: &mut HashMap<u32, (f64, f64, f64, f64)>) {
+        if siblings.is_empty() {
+            return;
+        }
+        if siblings.len() == 1 {
+            self.layout_node_bsp(siblings[0], rect, out);
+        } else {
+            let mid = siblings.len() / 2;
+            let (x, y, w, h) = rect;
+            let top_h = h / 2.0;
+            let bottom_h = h - top_h;
+            self.layout_siblings_bsp(&siblings[..mid], (x, y, w, top_h), out);
+            self.layout_siblings_bsp(&siblings[mid..], (x, y + top_h, w, bottom_h), out);
+        }
     }
 
     fn layout_tree(&mut self) {
@@ -349,8 +356,8 @@ impl Treewm {
         // Set animation targets.
         for (id, cx, cy) in positions {
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
-                cw.target_x = cx;
-                cw.target_y = cy;
+                cw.target_x = cw.tree_x.unwrap_or(cx);
+                cw.target_y = cw.tree_y.unwrap_or(cy);
             }
         }
 
@@ -501,17 +508,20 @@ impl Treewm {
     /// Lerp all canvas and viewport positions toward their targets. Call once per frame.
     pub fn tick_animation(&mut self) {
         let Some(start) = self.anim_start else { return };
-        const DURATION: f64 = 0.2;
+        const DURATION: f64 = 0.3;
         let t = (start.elapsed().as_secs_f64() / DURATION).min(1.0);
 
+        // Cubic ease-out for smoother deceleration
+        let ease_t = 1.0 - (1.0 - t).powi(3);
+
         for cw in &mut self.windows {
-            cw.canvas_x = cw.anim_start_x + (cw.target_x - cw.anim_start_x) * t;
-            cw.canvas_y = cw.anim_start_y + (cw.target_y - cw.anim_start_y) * t;
+            cw.canvas_x = cw.anim_start_x + (cw.target_x - cw.anim_start_x) * ease_t;
+            cw.canvas_y = cw.anim_start_y + (cw.target_y - cw.anim_start_y) * ease_t;
         }
         self.viewport_x = self.viewport_anim_start_x
-            + (self.viewport_target_x - self.viewport_anim_start_x) * t;
+            + (self.viewport_target_x - self.viewport_anim_start_x) * ease_t;
         self.viewport_y = self.viewport_anim_start_y
-            + (self.viewport_target_y - self.viewport_anim_start_y) * t;
+            + (self.viewport_target_y - self.viewport_anim_start_y) * ease_t;
 
         if t >= 1.0 {
             self.anim_start = None;

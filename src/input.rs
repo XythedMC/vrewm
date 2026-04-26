@@ -118,7 +118,14 @@ impl Treewm {
                 if toggle_view_mode {
                     self.view_mode = match self.view_mode {
                         ViewMode::Tiling => ViewMode::TreeView,
-                        ViewMode::TreeView => ViewMode::Tiling,
+                        ViewMode::TreeView => {
+                            self.tiling_root_id = self.focused_window_id;
+                            self.zoom = 1.0;
+                            if let Some(output) = self.space.outputs().next() {
+                                output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
+                            }
+                            ViewMode::Tiling
+                        }
                     };
                     self.apply_layout();
                 }
@@ -126,6 +133,7 @@ impl Treewm {
                 // Apply tree focus change (keyboard mutex now released).
                 if let Some(target_id) = pending_tree_focus {
                     self.focus_by_id(target_id);
+                    self.tiling_root_id = Some(target_id);
                     match self.view_mode {
                         ViewMode::Tiling => self.apply_layout(),
                         ViewMode::TreeView => self.center_viewport_on_focused(),
@@ -256,6 +264,28 @@ impl Treewm {
                 });
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
+
+                if self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
+                    let pointer = self.seat.get_pointer().unwrap();
+                    let pointer_loc = pointer.current_location();
+
+                    let old_zoom = self.zoom;
+                    let zoom_factor = 1.1_f64.powf(-vertical_amount / 15.0);
+                    self.zoom = (self.zoom * zoom_factor).clamp(0.2, 5.0);
+
+                    self.viewport_x += pointer_loc.x - pointer_loc.x * (old_zoom / self.zoom);
+                    self.viewport_y += pointer_loc.y - pointer_loc.y * (old_zoom / self.zoom);
+                    self.viewport_target_x = self.viewport_x;
+                    self.viewport_target_y = self.viewport_y;
+                    self.viewport_anim_start_x = self.viewport_x;
+                    self.viewport_anim_start_y = self.viewport_y;
+
+                    if let Some(output) = self.space.outputs().next() {
+                        output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
+                    }
+                    self.sync_window_positions();
+                    return;
+                }
 
                 let mut frame = AxisFrame::new(event.time_msec()).source(source);
                 if horizontal_amount != 0.0 {

@@ -51,6 +51,10 @@ impl PointerGrab<Treewm> for MoveSurfaceGrab {
                 cw.target_y = new_canvas_y;
                 cw.anim_start_x = new_canvas_x;
                 cw.anim_start_y = new_canvas_y;
+                if data.view_mode == crate::state::ViewMode::TreeView {
+                    cw.tree_x = Some(new_canvas_x);
+                    cw.tree_y = Some(new_canvas_y);
+                }
                 break;
             }
         }

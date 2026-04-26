@@ -62,6 +62,8 @@ impl XdgShellHandler for Treewm {
             anim_start_y: canvas_y,
             parent_id,
             children: Vec::new(),
+            tree_x: None,
+            tree_y: None,
         });
 
         self.focus_by_id(id);
@@ -123,6 +125,10 @@ impl XdgShellHandler for Treewm {
                 Some(fid) => self.focus_by_id(fid),
                 None => self.focus_clear(),
             }
+        }
+
+        if self.tiling_root_id == Some(dead_id) {
+            self.tiling_root_id = self.focused_window_id;
         }
 
         self.print_tree();
