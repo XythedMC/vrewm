@@ -86,6 +86,7 @@ pub struct Treewm {
     pub popups: PopupManager,
 
     pub seat: Seat<Self>,
+    pub event_tx: Option<tokio::sync::broadcast::Sender<crate::ipc::IpcEvent>>,
 }
 
 impl Treewm {
@@ -136,6 +137,7 @@ impl Treewm {
             data_device_state,
             popups,
             seat,
+            event_tx: None,
         }
     }
 
@@ -183,7 +185,10 @@ impl Treewm {
 
     /// Set keyboard focus to the window with this ID and update our tracking field.
     pub fn focus_by_id(&mut self, id: u32) {
-        self.focused_window_id = Some(id);
+        if self.focused_window_id != Some(id) {
+            self.focused_window_id = Some(id);
+            self.emit_event(crate::ipc::IpcEvent::FocusChanged { id: Some(id.to_string()) });
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let surface = self
             .windows
@@ -196,7 +201,10 @@ impl Treewm {
 
     /// Clear keyboard focus.
     pub fn focus_clear(&mut self) {
-        self.focused_window_id = None;
+        if self.focused_window_id.is_some() {
+            self.focused_window_id = None;
+            self.emit_event(crate::ipc::IpcEvent::FocusChanged { id: None });
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let keyboard = self.seat.get_keyboard().unwrap();
         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
@@ -236,6 +244,7 @@ impl Treewm {
             ViewMode::Tiling => self.layout_tiling(),
             ViewMode::TreeView => self.layout_tree(),
         }
+        self.emit_event(crate::ipc::IpcEvent::LayoutChanged);
     }
 
     fn output_size(&self) -> (f64, f64) {
@@ -474,6 +483,7 @@ impl Treewm {
         self.viewport_anim_start_x = self.viewport_x;
         self.viewport_anim_start_y = self.viewport_y;
         self.sync_window_positions();
+        self.emit_event(crate::ipc::IpcEvent::ViewportChanged { x: self.viewport_x, y: self.viewport_y });
     }
 
     pub fn sync_window_positions(&mut self) {
@@ -624,6 +634,90 @@ impl Treewm {
                 .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                 .map(|(s, p)| (s, (p + location).to_f64()))
         })
+    }
+
+    // ── IPC ───────────────────────────────────────────────────────────────
+    pub fn emit_event(&self, event: crate::ipc::IpcEvent) {
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(event);
+        }
+    }
+
+    pub fn handle_ipc_cmd(&mut self, cmd: crate::ipc::InternalCommand) {
+        use crate::ipc::{InternalCommand, TreeWindow, TreeViewport, TreeResponse, IpcEvent};
+        match cmd {
+            InternalCommand::GetTree { reply_to } => {
+                let windows = self.windows.iter().map(|cw| {
+                    let title = cw.window.toplevel().map(|t| {
+                        smithay::wayland::compositor::with_states(t.wl_surface(), |states| {
+                            states.data_map.get::<std::sync::Mutex<smithay::wayland::shell::xdg::XdgToplevelSurfaceRoleAttributes>>()
+                                .and_then(|attr| attr.lock().unwrap().title.clone())
+                        })
+                    }).flatten().unwrap_or_default();
+                    let geo = cw.window.geometry();
+                    let (width, height) = (geo.size.w, geo.size.h);
+                    TreeWindow {
+                        id: cw.id.to_string(),
+                        title,
+                        parent: cw.parent_id.map(|id| id.to_string()),
+                        children: cw.children.iter().map(|id| id.to_string()).collect(),
+                        canvas_x: cw.canvas_x,
+                        canvas_y: cw.canvas_y,
+                        width,
+                        height,
+                        focused: self.focused_window_id == Some(cw.id),
+                    }
+                }).collect();
+                let mode = match self.view_mode {
+                    ViewMode::Tiling => "tiling".to_string(),
+                    ViewMode::TreeView => "tree".to_string(),
+                };
+                let resp = TreeResponse {
+                    windows,
+                    viewport: TreeViewport { x: self.viewport_x, y: self.viewport_y },
+                    mode,
+                };
+                let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
+            }
+            InternalCommand::Focus { id } => {
+                if let Ok(id) = id.parse::<u32>() {
+                    self.focus_by_id(id);
+                    self.tiling_root_id = Some(id);
+                    match self.view_mode {
+                        ViewMode::Tiling => self.apply_layout(),
+                        ViewMode::TreeView => self.center_viewport_on_focused(),
+                    }
+                }
+            }
+            InternalCommand::Pan { dx, dy } => {
+                self.pan(dx, dy);
+                self.emit_event(IpcEvent::ViewportChanged {
+                    x: self.viewport_x,
+                    y: self.viewport_y,
+                });
+            }
+            InternalCommand::SetMode { mode } => {
+                let new_mode = if mode == "tiling" {
+                    ViewMode::Tiling
+                } else if mode == "tree" {
+                    ViewMode::TreeView
+                } else {
+                    return;
+                };
+                if self.view_mode != new_mode {
+                    self.view_mode = new_mode;
+                    if new_mode == ViewMode::Tiling {
+                        self.tiling_root_id = self.focused_window_id;
+                        self.zoom = 1.0;
+                        if let Some(output) = self.space.outputs().next() {
+                            output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
+                        }
+                    }
+                    self.apply_layout();
+                    self.emit_event(IpcEvent::ModeChanged { mode: mode.clone() });
+                }
+            }
+        }
     }
 
     // ── Debug output ───────────────────────────────────────────────────────

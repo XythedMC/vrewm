@@ -1,6 +1,7 @@
 mod grabs;
 mod handlers;
 mod input;
+mod ipc;
 mod state;
 mod winit;
 
@@ -20,6 +21,25 @@ fn main() {
     let display: Display<Treewm> = Display::new().unwrap();
 
     let mut state = Treewm::new(&mut event_loop, display);
+
+    let (cmd_tx, cmd_rx) = smithay::reexports::calloop::channel::channel::<ipc::InternalCommand>();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(16);
+
+    state.event_tx = Some(event_tx);
+
+    let socket_path = std::path::PathBuf::from("/tmp/treewm.sock");
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            ipc::run_ipc_server(cmd_tx, event_rx, &socket_path).await;
+        });
+    });
+
+    event_loop.handle().insert_source(cmd_rx, |event, _, state| {
+        if let smithay::reexports::calloop::channel::Event::Msg(cmd) = event {
+            state.handle_ipc_cmd(cmd);
+        }
+    }).unwrap();
 
     winit::init_winit(&mut event_loop, &mut state).expect("Failed to initialize winit backend");
 

@@ -66,6 +66,11 @@ impl XdgShellHandler for Treewm {
             tree_y: None,
         });
 
+        self.emit_event(crate::ipc::IpcEvent::WindowOpened {
+            id: id.to_string(),
+            parent: parent_id.map(|pid| pid.to_string()),
+        });
+
         self.focus_by_id(id);
         self.print_tree();
         // In tree view, other windows are free-form — don't reposition them for a new window.
@@ -114,6 +119,7 @@ impl XdgShellHandler for Treewm {
         // If dead window was a root, its orphans already have parent_id = None → they are roots.
 
         self.windows.remove(pos);
+        self.emit_event(crate::ipc::IpcEvent::WindowClosed { id: dead_id.to_string() });
 
         // Update focus.
         if self.focused_window_id == Some(dead_id) {

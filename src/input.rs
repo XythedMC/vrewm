@@ -128,6 +128,11 @@ impl Treewm {
                         }
                     };
                     self.apply_layout();
+                    let mode_str = match self.view_mode {
+                        ViewMode::Tiling => "tiling".to_string(),
+                        ViewMode::TreeView => "tree".to_string(),
+                    };
+                    self.emit_event(crate::ipc::IpcEvent::ModeChanged { mode: mode_str });
                 }
 
                 // Apply tree focus change (keyboard mutex now released).
