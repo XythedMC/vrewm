@@ -14,7 +14,16 @@ use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
-use smithay::{delegate_data_device, delegate_output, delegate_seat};
+use smithay::wayland::selection::primary_selection::{PrimarySelectionHandler, PrimarySelectionState, set_primary_focus};
+use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
+use smithay::wayland::shell::xdg::ToplevelSurface;
+use smithay::wayland::xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData};
+use smithay::wayland::fractional_scale::FractionalScaleHandler;
+use smithay::wayland::dmabuf::{DmabufHandler, DmabufState, ImportNotifier};
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
+use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::{delegate_data_device, delegate_output, delegate_seat, delegate_primary_selection};
+use smithay::{delegate_xdg_decoration, delegate_xdg_activation, delegate_viewporter, delegate_fractional_scale, delegate_dmabuf};
 
 impl SeatHandler for Treewm {
     type KeyboardFocus = WlSurface;
@@ -35,7 +44,8 @@ impl SeatHandler for Treewm {
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let dh = &self.display_handle;
         let client = focused.and_then(|s| dh.get_client(s.id()).ok());
-        set_data_device_focus(dh, seat, client);
+        set_data_device_focus(dh, seat, client.clone());
+        set_primary_focus(dh, seat, client);
     }
 }
 
@@ -81,3 +91,58 @@ delegate_data_device!(Treewm);
 
 impl OutputHandler for Treewm {}
 delegate_output!(Treewm);
+
+impl PrimarySelectionHandler for Treewm {
+    fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
+        &mut self.primary_selection_state
+    }
+}
+delegate_primary_selection!(Treewm);
+
+impl XdgDecorationHandler for Treewm {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: zxdg_toplevel_decoration_v1::Mode) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+}
+delegate_xdg_decoration!(Treewm);
+
+impl XdgActivationHandler for Treewm {
+    fn activation_state(&mut self) -> &mut XdgActivationState {
+        &mut self.activation_state
+    }
+    fn request_activation(&mut self, _token: XdgActivationToken, _data: XdgActivationTokenData, _surface: WlSurface) {}
+}
+delegate_xdg_activation!(Treewm);
+
+delegate_viewporter!(Treewm);
+
+impl FractionalScaleHandler for Treewm {
+    fn new_fractional_scale(&mut self, _surface: WlSurface) {}
+}
+delegate_fractional_scale!(Treewm);
+
+impl DmabufHandler for Treewm {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+    fn dmabuf_imported(&mut self, _global: &smithay::wayland::dmabuf::DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
+        // Queue for import on the next render frame where the renderer is available.
+        self.pending_dmabufs.push((dmabuf, notifier));
+    }
+}
+delegate_dmabuf!(Treewm);

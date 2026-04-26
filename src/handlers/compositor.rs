@@ -37,7 +37,7 @@ impl CompositorHandler for Treewm {
             if let Some(window) = self
                 .space
                 .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &root)
+                .find(|w| w.toplevel().map_or(false, |t| t.wl_surface() == &root))
             {
                 window.on_commit();
             }

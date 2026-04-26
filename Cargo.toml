@@ -18,4 +18,5 @@ features = [
     "backend_winit",
     "wayland_frontend",
     "desktop",
+    "use_system_lib",
 ]

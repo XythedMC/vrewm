@@ -17,6 +17,18 @@ fn main() {
         )
         .init();
 
+    // Collect args: treewm [-e cmd [args...]]
+    let args: Vec<String> = std::env::args().collect();
+    let startup_cmd: Option<Vec<String>> = {
+        let mut it = args.iter().skip(1);
+        if it.next().map(|s| s == "-e").unwrap_or(false) {
+            let rest: Vec<String> = args.iter().skip(2).cloned().collect();
+            if rest.is_empty() { None } else { Some(rest) }
+        } else {
+            None
+        }
+    };
+
     let mut event_loop: EventLoop<Treewm> = EventLoop::try_new().unwrap();
     let display: Display<Treewm> = Display::new().unwrap();
 
@@ -43,8 +55,40 @@ fn main() {
 
     winit::init_winit(&mut event_loop, &mut state).expect("Failed to initialize winit backend");
 
-    std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
-    eprintln!("treewm: WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy());
+    let socket_str = state.socket_name.to_string_lossy().into_owned();
+
+    // Propagate into our own environment so child processes inherit the right display.
+    std::env::set_var("WAYLAND_DISPLAY",            &state.socket_name);
+    std::env::set_var("MOZ_ENABLE_WAYLAND",         "1");  // Firefox / Zen
+    std::env::set_var("GDK_BACKEND",                "wayland");
+    std::env::set_var("QT_QPA_PLATFORM",            "wayland");
+    std::env::set_var("ELECTRON_OZONE_PLATFORM_HINT", "wayland"); // Electron (Spotify, Claude …)
+    std::env::set_var("CLUTTER_BACKEND",            "wayland");
+    std::env::set_var("SDL_VIDEODRIVER",            "wayland");
+
+    eprintln!("treewm: WAYLAND_DISPLAY={socket_str}");
+    eprintln!("treewm: to run apps in this session:");
+    eprintln!("  WAYLAND_DISPLAY={socket_str} <app>");
+    eprintln!("  or start with:  treewm -e <terminal>");
+
+    // Spawn the startup command (e.g. a terminal) with all Wayland env vars baked in.
+    if let Some(cmd) = startup_cmd {
+        let (prog, argv) = cmd.split_first().unwrap();
+        match std::process::Command::new(prog)
+            .args(argv)
+            .env("WAYLAND_DISPLAY",               &state.socket_name)
+            .env("MOZ_ENABLE_WAYLAND",            "1")
+            .env("GDK_BACKEND",                   "wayland")
+            .env("QT_QPA_PLATFORM",               "wayland")
+            .env("ELECTRON_OZONE_PLATFORM_HINT",  "wayland")
+            .env("CLUTTER_BACKEND",               "wayland")
+            .env("SDL_VIDEODRIVER",               "wayland")
+            .spawn()
+        {
+            Ok(_)  => eprintln!("treewm: spawned: {}", cmd.join(" ")),
+            Err(e) => eprintln!("treewm: failed to spawn '{}': {e}", cmd.join(" ")),
+        }
+    }
 
     event_loop
         .run(None, &mut state, |_| {})

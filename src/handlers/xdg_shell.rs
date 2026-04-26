@@ -31,6 +31,7 @@ impl XdgShellHandler for Treewm {
         });
 
         let id = self.alloc_id();
+        tracing::info!("new_toplevel: id={id}");
 
         // Parent = currently focused window; None means new tree root.
         let parent_id = self.focused_window_id;
@@ -64,6 +65,8 @@ impl XdgShellHandler for Treewm {
             children: Vec::new(),
             tree_x: None,
             tree_y: None,
+            base_width: 800,
+            base_height: 600,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {
@@ -227,7 +230,7 @@ pub fn handle_commit(
 ) {
     if let Some(window) = space
         .elements()
-        .find(|w| w.toplevel().unwrap().wl_surface() == surface)
+        .find(|w| w.toplevel().map_or(false, |t| t.wl_surface() == surface))
         .cloned()
     {
         let initial_configure_sent = with_states(surface, |states| {

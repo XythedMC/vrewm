@@ -41,8 +41,26 @@ impl Treewm {
 
                         let sym = handle.modified_sym();
 
+                        // ── Window resizing (Ctrl + Shift + Arrow) ─────────────
+                        // Must be checked before the plain Ctrl+Arrow pan block.
+                        if modifiers.ctrl && modifiers.shift {
+                            if let Some(fid) = data.focused_window_id {
+                                if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == fid) {
+                                    match sym {
+                                        Keysym::Left  => cw.base_width  = (cw.base_width  - 32).max(128),
+                                        Keysym::Right => cw.base_width  =  cw.base_width  + 32,
+                                        Keysym::Up    => cw.base_height = (cw.base_height - 32).max(128),
+                                        Keysym::Down  => cw.base_height =  cw.base_height + 32,
+                                        _ => {}
+                                    }
+                                    data.apply_layout();
+                                    return FilterResult::Intercept(());
+                                }
+                            }
+                        }
+
                         // ── Viewport panning (Ctrl + Arrow / Home) ──────────────
-                        if modifiers.ctrl {
+                        if modifiers.ctrl && !modifiers.shift {
                             if sym == Keysym::Left {
                                 data.pan(-100.0, 0.0);
                                 return FilterResult::Intercept(());

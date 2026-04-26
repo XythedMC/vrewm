@@ -9,6 +9,7 @@ use smithay::{
                 element::PixelShaderElement,
                 GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType,
             },
+            ImportDma, ImportEgl,
         },
         winit::{self, WinitEvent},
     },
@@ -141,8 +142,12 @@ fn connector_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShade
             let cx = (cw.canvas_x    - state.viewport_x) as f32;
             let cy = (cw.canvas_y    - state.viewport_y) as f32;
 
+            let phw = parent.base_width  as f32 / 2.0;
+            let ph  = parent.base_height as f32;
+            let chw = cw.base_width      as f32 / 2.0;
+
             // Parent bottom-center → child top-center.
-            Some(line_element(prog, (px + 400.0, py + 600.0), (cx + 400.0, cy)))
+            Some(line_element(prog, (px + phw, py + ph), (cx + chw, cy)))
         })
         .collect()
 }
@@ -159,10 +164,11 @@ fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelSh
 
     let sx = (cw.canvas_x - state.viewport_x) as i32;
     let sy = (cw.canvas_y - state.viewport_y) as i32;
-    let ww = 800_i32;
-    let wh = 600_i32;
+    let geo = cw.window.geometry();
+    let ww = geo.size.w;
+    let wh = geo.size.h;
     let t = 2_i32;
-    let color = (1.0_f32, 0.90_f32, 0.3_f32, 1.0_f32); // bright amber, premultiplied handled by shader
+    let color = (1.0_f32, 0.90_f32, 0.3_f32, 1.0_f32); // bright amber
 
     let rects = [
         Rectangle { loc: (sx,       sy - t     ).into(), size: (ww,         t          ).into() },
@@ -175,7 +181,7 @@ fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelSh
         PixelShaderElement::new(
             prog.clone(),
             area,
-            Some(vec![area]),
+            None, // Damage = None means Smithay handles it or we force full redraw
             1.0,
             vec![Uniform::new("u_color", color)],
             Kind::Unspecified,
@@ -195,7 +201,7 @@ fn indicator_element(state: &Treewm, prog: &GlesPixelProgram) -> PixelShaderElem
     PixelShaderElement::new(
         prog.clone(),
         area,
-        Some(vec![area]),
+        None,
         1.0,
         vec![Uniform::new("u_color", color)],
         Kind::Unspecified,
@@ -242,6 +248,23 @@ pub fn init_winit(
     let line_prog  = compile_line(backend.renderer());
     let solid_prog = compile_solid(backend.renderer());
 
+    // Advertise DMABuf formats. Use the renderer's own format set which is
+    // correct for both Mesa (DMABuf) and NVIDIA (EGLStream) paths.
+    {
+        let formats = backend.renderer().dmabuf_formats();
+        let _ = state.dmabuf_state.create_global::<Treewm>(&state.display_handle, formats);
+    }
+
+    // Bind the EGL display to the Wayland display.
+    // On NVIDIA this is mandatory: it registers wl_drm + EGLStream globals that
+    // NVIDIA apps probe for on connection.  Without it they immediately close the
+    // socket (seen in logs as connect → ConnectionClosed with no new_toplevel).
+    // On Mesa this enables wl_drm fallback for older apps that need it.
+    match backend.renderer().bind_wl_display(&state.display_handle) {
+        Ok(_)  => tracing::info!("EGL bound to Wayland display (wl_drm/EGLStream enabled)"),
+        Err(e) => tracing::warn!("bind_wl_display failed (ok on non-EGL paths): {e}"),
+    }
+
     backend.window().request_redraw();
 
     event_loop
@@ -259,6 +282,18 @@ pub fn init_winit(
                 WinitEvent::Input(event) => state.process_input_event(event),
                 WinitEvent::Redraw => {
                     state.tick_animation();
+
+                    // Import any DMABuf buffers that clients submitted since the last frame.
+                    let pending = std::mem::take(&mut state.pending_dmabufs);
+                    for (dmabuf, notifier) in pending {
+                        match backend.renderer().import_dmabuf(&dmabuf, None) {
+                            Ok(_) => { let _ = notifier.successful::<Treewm>(); }
+                            Err(e) => {
+                                tracing::warn!("dmabuf import failed: {e}");
+                                notifier.failed();
+                            }
+                        }
+                    }
 
                     let size   = backend.window_size();
                     let damage = Rectangle::from_size(size);
@@ -293,7 +328,7 @@ pub fn init_winit(
                             &output,
                             renderer,
                             &mut framebuffer,
-                            1.0,
+                            state.zoom as f32,
                             0,
                             [&state.space],
                             &overlays,
