@@ -1,0 +1,8 @@
+   Compiling treewm v0.1.0 (/home/kapa/vrewm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running `target/debug/treewm`
+[2m2026-04-27T18:22:58.731103Z[0m [33m WARN[0m [2msmithay::backend::egl::error[0m[2m:[0m Erroneous EGL call didn't set EGLError
+treewm: WAYLAND_DISPLAY=wayland-2
+treewm: to run apps in this session:
+  WAYLAND_DISPLAY=wayland-2 <app>
+  or start with:  treewm -e <terminal>

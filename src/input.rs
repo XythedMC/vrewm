@@ -97,6 +97,14 @@ impl Treewm {
 
                         // ── Tree navigation (Ctrl + P / N / C) ──────────────────
                         if main_mod {
+                            if sym == Keysym::q {
+                                data.windows
+                                    .iter()
+                                    .find(|cw| cw.id == data.focused_window_id.expect("No focused window to close"))
+                                    .and_then(|cw| cw.window.toplevel()
+                                    .map(|t| t.send_close()));
+                                return FilterResult::Intercept(());
+                            }
                             if sym == Keysym::p {
                                 pending_tree_focus = data
                                     .focused_window_id

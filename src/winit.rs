@@ -224,7 +224,7 @@ pub fn init_winit(
     let output = Output::new(
         "winit".to_string(),
         PhysicalProperties {
-            size: (0, 0).into(),
+            size: (800, 600).into(),
             subpixel: Subpixel::Unknown,
             make: "Smithay".into(),
             model: "Winit".into(),
@@ -328,7 +328,7 @@ pub fn init_winit(
                             &output,
                             renderer,
                             &mut framebuffer,
-                            state.zoom as f32,
+                            1.0,
                             0,
                             [&state.space],
                             &overlays,

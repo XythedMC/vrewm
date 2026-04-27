@@ -301,12 +301,18 @@ impl Treewm {
     }
 
     fn output_size(&self) -> (f64, f64) {
-        self.space
+        let (w, h) = self.space
             .outputs()
             .next()
             .and_then(|o| self.space.output_geometry(o))
             .map(|g| (g.size.w as f64, g.size.h as f64))
-            .unwrap_or((1920.0, 1080.0))
+            .unwrap_or((1920.0, 1080.0));
+        
+        if w <= 0.0 || h <= 0.0 {
+            (800.0, 600.0)
+        } else {
+            (w, h)
+        }
     }
 
     fn layout_tiling(&mut self) {
@@ -332,7 +338,7 @@ impl Treewm {
                 .and_then(|cw| cw.window.toplevel());
             if let Some(tl) = toplevel {
                 tl.with_pending_state(|s| { s.size = Some((sw, sh).into()); });
-                tl.send_configure();
+                tl.send_pending_configure();
             }
         }
 
@@ -428,7 +434,7 @@ impl Treewm {
                     tl.with_pending_state(|s| {
                         s.size = Some((bw, bh).into());
                     });
-                    tl.send_configure();
+                    tl.send_pending_configure();
                 }
             }
         }

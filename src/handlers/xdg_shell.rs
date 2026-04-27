@@ -243,7 +243,7 @@ pub fn handle_commit(
                 .initial_configure_sent
         });
         if !initial_configure_sent {
-            window.toplevel().unwrap().send_configure();
+            window.toplevel().unwrap().send_pending_configure();
         }
     }
 

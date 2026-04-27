@@ -105,19 +105,19 @@ impl XdgDecorationHandler for Treewm {
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
         });
-        toplevel.send_configure();
+        toplevel.send_pending_configure();
     }
     fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: zxdg_toplevel_decoration_v1::Mode) {
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
         });
-        toplevel.send_configure();
+        toplevel.send_pending_configure();
     }
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         toplevel.with_pending_state(|state| {
             state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
         });
-        toplevel.send_configure();
+        toplevel.send_pending_configure();
     }
 }
 delegate_xdg_decoration!(Treewm);
@@ -133,7 +133,13 @@ delegate_xdg_activation!(Treewm);
 delegate_viewporter!(Treewm);
 
 impl FractionalScaleHandler for Treewm {
-    fn new_fractional_scale(&mut self, _surface: WlSurface) {}
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        smithay::wayland::compositor::with_states(&surface, |states| {
+            smithay::wayland::fractional_scale::with_fractional_scale(states, |fs| {
+                fs.set_preferred_scale(1.0);
+            });
+        });
+    }
 }
 delegate_fractional_scale!(Treewm);
 
