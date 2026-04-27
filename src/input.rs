@@ -27,7 +27,7 @@ impl Treewm {
                 let mut snap_to_roots_requested = false;
                 let mut reset_viewport_requested = false;
 
-                let keyboard = self.seat.get_keyboard().unwrap();
+                let keyboard = self.seat.get_keyboard().expect("Keyboard not found while trying to add it");
                 keyboard.input::<(), _>(
                     self,
                     event.key_code(),

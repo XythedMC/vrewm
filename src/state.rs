@@ -128,7 +128,7 @@ impl Treewm {
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "winit");
-        seat.add_keyboard(Default::default(), 200, 25).unwrap();
+        seat.add_keyboard(Default::default(), 200, 25).expect("Keyboard not found while trying to add it");
         seat.add_pointer();
 
         let space = Space::default();
@@ -177,7 +177,7 @@ impl Treewm {
         display: Display<Treewm>,
         event_loop: &mut EventLoop<Self>,
     ) -> OsString {
-        let listening_socket = ListeningSocketSource::new_auto().unwrap();
+        let listening_socket = ListeningSocketSource::new_auto().expect("Couldn't create new Wayland listening socket as all sockets are taken");
         let socket_name = listening_socket.socket_name().to_os_string();
         let loop_handle = event_loop.handle();
 
@@ -186,7 +186,7 @@ impl Treewm {
                 state
                     .display_handle
                     .insert_client(client_stream, Arc::new(ClientState::default()))
-                    .unwrap();
+                    .expect("Couldn't insert client as it was invalid by insertion time");
             })
             .expect("Failed to init wayland socket");
 
@@ -195,12 +195,12 @@ impl Treewm {
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state| {
                     unsafe {
-                        display.get_mut().dispatch_clients(state).unwrap();
+                        display.get_mut().dispatch_clients(state).expect("Failed to dispatch clients");
                     }
                     Ok(PostAction::Continue)
                 },
             )
-            .unwrap();
+            .expect("Failed to insert display into the loop");
 
         socket_name
     }
@@ -227,7 +227,7 @@ impl Treewm {
             .iter()
             .find(|cw| cw.id == id)
             .and_then(|cw| cw.window.toplevel().map(|t| t.wl_surface().clone()));
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
         keyboard.set_focus(self, surface, serial);
     }
 
@@ -238,7 +238,7 @@ impl Treewm {
             self.emit_event(crate::ipc::IpcEvent::FocusChanged { id: None });
         }
         let serial = SERIAL_COUNTER.next_serial();
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
     }
 
@@ -321,8 +321,7 @@ impl Treewm {
                 cw.target_x = tx;
                 cw.target_y = ty;
             } else {
-                cw.target_x = -10_000.0;
-                cw.target_y = 0.0;
+                self.space.unmap_elem(&cw.window);
             }
         }
 
@@ -674,7 +673,10 @@ impl Treewm {
                     let title = cw.window.toplevel().map(|t| {
                         smithay::wayland::compositor::with_states(t.wl_surface(), |states| {
                             states.data_map.get::<std::sync::Mutex<smithay::wayland::shell::xdg::XdgToplevelSurfaceRoleAttributes>>()
-                                .and_then(|attr| attr.lock().unwrap().title.clone())
+                                .and_then(|attr| attr.lock().unwrap_or_else(|e| {
+                                    tracing::warn!("Mutex poisoned getting window title: {e}");
+                                    e.into_inner()
+                                }).title.clone())
                         })
                     }).flatten().unwrap_or_default();
                     let geo = cw.window.geometry();
@@ -700,7 +702,7 @@ impl Treewm {
                     viewport: TreeViewport { x: self.viewport_x, y: self.viewport_y },
                     mode,
                 };
-                let _ = reply_to.send(serde_json::to_string(&resp).unwrap());
+                let _ = reply_to.send(serde_json::to_string(&resp).expect("Tree Responses implementation of Serialize failed, or tree response contains a map with non-string keys"));
             }
             InternalCommand::Focus { id } => {
                 if let Ok(id) = id.parse::<u32>() {
