@@ -1,1 +1,0 @@
-for<'a, 'b, 'c, 'e, 'd> fn(&'a smithay::output::Output, &'b mut _, &'c mut <_ as RendererSuper>::Framebuffer<'e>, f32, usize, _, &[_], &'d mut OutputDamageTracker, _) -> Result<RenderOutputResult<'d>, smithay::backend::renderer::damage::Error<<_ as RendererSuper>::Error>> {render_output::<'_, _, _, _, _, _>}
