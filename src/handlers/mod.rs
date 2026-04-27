@@ -1,5 +1,6 @@
 mod compositor;
 mod xdg_shell;
+pub mod config;
 
 use crate::Treewm;
 

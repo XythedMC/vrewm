@@ -30,11 +30,20 @@ use smithay::{
     },
 };
 
+use crate::handlers::config::TreeWMConfig;
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
     #[default]
     Tiling,
     TreeView,
+}
+#[derive(Clone, Copy)]
+pub enum ModifierKey {
+    Ctrl,
+    Alt,
+    Super,
+    Shift,
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
@@ -86,6 +95,7 @@ pub struct Treewm {
     pub tiling_root_id: Option<u32>,
     pub view_mode: ViewMode,
     pub zoom: f64,
+    pub gap: f64,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -104,12 +114,13 @@ pub struct Treewm {
     pub seat: Seat<Self>,
     pub event_tx: Option<tokio::sync::broadcast::Sender<crate::ipc::IpcEvent>>,
 
+    pub main_modifier: ModifierKey,
     /// DMABuf buffers waiting to be imported by the renderer on the next frame.
     pub pending_dmabufs: Vec<(Dmabuf, ImportNotifier)>,
 }
 
 impl Treewm {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>) -> Self {
+    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, config: TreeWMConfig) -> Self {
         let start_time = std::time::Instant::now();
         let dh = display.handle();
 
@@ -135,6 +146,14 @@ impl Treewm {
         let socket_name = Self::init_wayland_listener(display, event_loop);
         let loop_signal = event_loop.get_signal();
 
+        let main_modifier = match config.main_modifier.as_str() {
+            "Ctrl" => ModifierKey::Ctrl,
+            "Super" => ModifierKey::Super,
+            "Shift" => ModifierKey::Shift,
+            "Alt" => ModifierKey::Alt,
+            _ => panic!("Main modifier from config file isnt allowed, options are: Ctrl, Super, Shift and Alt")
+        };
+
         Self {
             start_time,
             display_handle: dh,
@@ -153,6 +172,7 @@ impl Treewm {
             tiling_root_id: None,
             view_mode: ViewMode::Tiling,
             zoom: 1.0,
+            gap: config.gap,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -169,6 +189,7 @@ impl Treewm {
             popups,
             seat,
             event_tx: None,
+            main_modifier,
             pending_dmabufs: Vec::new(),
         }
     }
@@ -364,9 +385,8 @@ impl Treewm {
     }
 
     fn layout_tree(&mut self) {
-        const WIN_W: f64 = 800.0;
         const LEVEL_H: f64 = 400.0;
-        const GAP: f64 = 80.0;
+        const WIN_W: f64 = 800.0;
 
         let widths = self.compute_subtree_widths();
 
@@ -382,14 +402,14 @@ impl Treewm {
         }
 
         let total_w: f64 = roots.iter().map(|&id| widths[&id]).sum::<f64>()
-            + GAP * (roots.len() - 1) as f64;
+            + self.gap * (roots.len() - 1) as f64;
 
         let mut alloc_x = -total_w / 2.0;
         let mut positions: Vec<(u32, f64, f64)> = Vec::new();
 
         for &root in &roots {
-            self.collect_positions(root, alloc_x, 0.0, LEVEL_H, GAP, WIN_W, &widths, &mut positions);
-            alloc_x += widths[&root] + GAP;
+            self.collect_positions(root, alloc_x, 0.0, LEVEL_H, self.gap, WIN_W, &widths, &mut positions);
+            alloc_x += widths[&root] + self.gap;
         }
 
         // Set animation targets.

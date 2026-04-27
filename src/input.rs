@@ -11,7 +11,7 @@ use smithay::{
     utils::SERIAL_COUNTER,
 };
 
-use crate::{grabs::PanCanvasGrab, state::ViewMode, Treewm};
+use crate::{Treewm, grabs::PanCanvasGrab, state::{ModifierKey, ViewMode}};
 
 impl Treewm {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -20,7 +20,7 @@ impl Treewm {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
                 let key_state = event.state();
-
+                
                 let mut pending_tree_focus: Option<u32> = None;
                 let mut toggle_view_mode = false;
                 let mut focus_zoom_requested = false;
@@ -40,10 +40,17 @@ impl Treewm {
                         }
 
                         let sym = handle.modified_sym();
-
+                        
+                        let main_modifier = data.main_modifier;
+                        let main_mod = match main_modifier {
+                            ModifierKey::Ctrl => modifiers.ctrl,
+                            ModifierKey::Alt => modifiers.alt,
+                            ModifierKey::Shift => modifiers.shift,
+                            ModifierKey::Super => modifiers.logo,
+                        };
                         // ── Window resizing (Ctrl + Shift + Arrow) ─────────────
                         // Must be checked before the plain Ctrl+Arrow pan block.
-                        if modifiers.ctrl && modifiers.shift {
+                        if main_mod && modifiers.shift {
                             if let Some(fid) = data.focused_window_id {
                                 if let Some(cw) = data.windows.iter_mut().find(|cw| cw.id == fid) {
                                     match sym {
@@ -60,7 +67,7 @@ impl Treewm {
                         }
 
                         // ── Viewport panning (Ctrl + Arrow / Home) ──────────────
-                        if modifiers.ctrl && !modifiers.shift {
+                        if main_mod && !modifiers.shift {
                             if sym == Keysym::Left {
                                 data.pan(-100.0, 0.0);
                                 return FilterResult::Intercept(());
@@ -83,13 +90,13 @@ impl Treewm {
                         }
 
                         // ── View mode toggle (Ctrl + Space) ─────────────────────
-                        if modifiers.ctrl && sym == Keysym::space {
+                        if main_mod && sym == Keysym::space {
                             toggle_view_mode = true;
                             return FilterResult::Intercept(());
                         }
 
                         // ── Tree navigation (Ctrl + P / N / C) ──────────────────
-                        if modifiers.ctrl {
+                        if main_mod {
                             if sym == Keysym::p {
                                 pending_tree_focus = data
                                     .focused_window_id
@@ -123,7 +130,7 @@ impl Treewm {
                         }
 
                         // ── Focus zoom (Ctrl + F, tree view) ────────────────────
-                        if modifiers.ctrl && sym == Keysym::f {
+                        if main_mod && sym == Keysym::f {
                             focus_zoom_requested = true;
                             return FilterResult::Intercept(());
                         }
@@ -183,12 +190,12 @@ impl Treewm {
             }
             InputEvent::PointerMotion { .. } => {}
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let output = self.space.outputs().next().unwrap();
-                let output_geo = self.space.output_geometry(output).unwrap();
+                let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
+                let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
                 let pos =
                     event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
                 let serial = SERIAL_COUNTER.next_serial();
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                 let under = self.surface_under(pos);
                 pointer.motion(
                     self,
@@ -202,8 +209,8 @@ impl Treewm {
                 pointer.frame(self);
             }
             InputEvent::PointerButton { event, .. } => {
-                let pointer = self.seat.get_pointer().unwrap();
-                let keyboard = self.seat.get_keyboard().unwrap();
+                let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
+                let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
                 let button_state = event.state();
@@ -229,7 +236,7 @@ impl Treewm {
                         .map(|(w, l)| (w.clone(), l))
                     {
                         self.space.raise_element(&window, true);
-                        let wl_surf = window.toplevel().unwrap().wl_surface().clone();
+                        let wl_surf = window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").wl_surface().clone();
                         keyboard.set_focus(self, Some(wl_surf.clone()), serial);
 
                         self.focused_window_id = self
@@ -248,7 +255,7 @@ impl Treewm {
                             ViewMode::Tiling => {
                                 self.apply_layout();
                                 self.space.elements().for_each(|window| {
-                                    window.toplevel().unwrap().send_pending_configure();
+                                    window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").send_pending_configure();
                                 });
                             }
                             ViewMode::TreeView => {}
@@ -256,7 +263,7 @@ impl Treewm {
                     } else {
                         self.space.elements().for_each(|window| {
                             window.set_activated(false);
-                            window.toplevel().unwrap().send_pending_configure();
+                            window.toplevel().expect("Couldn't get ToplevelSurface as window is a popup").send_pending_configure();
                         });
                         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
                         self.focused_window_id = None;
@@ -289,7 +296,7 @@ impl Treewm {
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
                 if self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
-                    let pointer = self.seat.get_pointer().unwrap();
+                    let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                     let pointer_loc = pointer.current_location();
 
                     let old_zoom = self.zoom;
@@ -332,7 +339,7 @@ impl Treewm {
                     }
                 }
 
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }

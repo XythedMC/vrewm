@@ -10,7 +10,9 @@ pub use state::Treewm;
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use tracing_subscriber::EnvFilter;
 
-fn main() {
+use crate::handlers::config::{create_config, read_config};
+
+fn main() -> anyhow::Result<()>{
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
@@ -29,10 +31,18 @@ fn main() {
         }
     };
 
+    let config = match read_config(){
+        Ok(treewm_config) => treewm_config,
+        Err(_) => {
+            create_config()?;
+            read_config().expect("Failed to read config after initial creation for some weird reason")
+        }
+    };
+
     let mut event_loop: EventLoop<Treewm> = EventLoop::try_new().expect("Failed to create event loop");
     let display: Display<Treewm> = Display::new().unwrap();
 
-    let mut state = Treewm::new(&mut event_loop, display);
+    let mut state = Treewm::new(&mut event_loop, display, config);
 
     let (cmd_tx, cmd_rx) = smithay::reexports::calloop::channel::channel::<ipc::InternalCommand>();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(16);
@@ -84,4 +94,5 @@ fn main() {
     event_loop
         .run(None, &mut state, |_| {})
         .expect("Event loop failed");
+    Ok(())
 }
