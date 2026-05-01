@@ -14,9 +14,10 @@ use smithay::{
 use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{ModifierKey, ViewMode}};
 
 impl Treewm {
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {        
         match event {
             InputEvent::Keyboard { event, .. } => {
+                
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
                 let key_state = event.state();
@@ -273,7 +274,6 @@ impl Treewm {
                         else if py > wy + wh - 8 { edge = ResizeEdge::Bottom; }
                         else if py < wy + 8 { edge = ResizeEdge::Top; }
 
-                        let window = cw.window.clone();
                         let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
                         let w = cw.base_width;
                         let h = cw.base_height;
@@ -284,7 +284,6 @@ impl Treewm {
                                 button: BTN_LEFT,
                                 location: pointer.current_location(),
                             },
-                            window: window,
                             window_surface: surface,
                             initial_width: w,
                             initial_height: h,

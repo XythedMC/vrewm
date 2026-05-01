@@ -153,39 +153,41 @@ fn connector_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShade
 }
 
 fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
-    let fid = match state.focused_window_id {
-        Some(id) => id,
-        None => return Vec::new(),
-    };
-    let cw = match state.windows.iter().find(|cw| cw.id == fid) {
-        Some(cw) => cw,
-        None => return Vec::new(),
-    };
+    let fid = state.focused_window_id;
+    state.windows.iter().flat_map(|cw| {
+        let sx = (cw.canvas_x - state.viewport_x) as i32;
+        let sy = (cw.canvas_y - state.viewport_y) as i32;
+        let ww = cw.base_width;
+        let wh = cw.base_height;
+        let t = 2_i32;
+        let mut color = [0.0, 0.0, 0.0, 1.0];
 
-    let sx = (cw.canvas_x - state.viewport_x) as i32;
-    let sy = (cw.canvas_y - state.viewport_y) as i32;
-    let geo = cw.window.geometry();
-    let ww = geo.size.w;
-    let wh = geo.size.h;
-    let t = 2_i32;
-    let color = (1.0_f32, 0.90_f32, 0.3_f32, 1.0_f32); // bright amber
+        if Some(cw.id) == fid {
+            let [r, g, b] = state.config.focused_border_color;
+            color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+        }
+        else {
+            let [r, g, b] = state.config.unfocused_border_color;
+            color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+        }
+        
+        let rects = [
+            Rectangle { loc: (sx,       sy - t     ).into(), size: (ww,         t          ).into() },
+            Rectangle { loc: (sx,       sy + wh    ).into(), size: (ww,         t          ).into() },
+            Rectangle { loc: (sx - t,   sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
+            Rectangle { loc: (sx + ww,  sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
+        ];
 
-    let rects = [
-        Rectangle { loc: (sx,       sy - t     ).into(), size: (ww,         t          ).into() },
-        Rectangle { loc: (sx,       sy + wh    ).into(), size: (ww,         t          ).into() },
-        Rectangle { loc: (sx - t,   sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
-        Rectangle { loc: (sx + ww,  sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
-    ];
-
-    rects.iter().map(|&area| {
-        PixelShaderElement::new(
-            prog.clone(),
-            area,
-            None, // Damage = None means Smithay handles it or we force full redraw
-            1.0,
-            vec![Uniform::new("u_color", color)],
-            Kind::Unspecified,
-        )
+        rects.iter().map(|&area| {
+            PixelShaderElement::new(
+                prog.clone(),
+                area,
+                None, // Damage = None means Smithay handles it or we force full redraw
+                1.0,
+                vec![Uniform::new("u_color", color)],
+                Kind::Unspecified,
+            )
+        }).collect::<Vec<_>>()
     }).collect()
 }
 
@@ -281,6 +283,7 @@ pub fn init_winit(
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
                 WinitEvent::Redraw => {
+                    println!("HIIIIIIIIII IM DRAWINGIGNIGNIGNIGNI");
                     state.tick_animation();
 
                     // Import any DMABuf buffers that clients submitted since the last frame.
@@ -311,11 +314,9 @@ pub fn init_winit(
                             if let Some(prog) = &line_prog {
                                 overlays.extend(connector_elements(state, prog));
                             }
-                            if let Some(prog) = &solid_prog {
-                                overlays.extend(focus_border_elements(state, prog));
-                            }
                         }
                         if let Some(prog) = &solid_prog {
+                            overlays.extend(focus_border_elements(state, prog));
                             overlays.push(indicator_element(state, prog));
                         }
 

@@ -8,6 +8,8 @@ use dirs::config_dir;
 pub struct TreeWMConfig {
     pub main_modifier: String,
     pub gap: f64,
+    pub focused_border_color: [u8; 3],
+    pub unfocused_border_color: [u8; 3],
     pub main_monitor: u8,
     pub use_title_bar: bool
 }
@@ -28,7 +30,14 @@ pub fn create_config() -> anyhow::Result<()>{
         .join("treewm")
         .join("treewm.toml");
 
-    let values = TreeWMConfig { main_modifier: String::from("Super"), gap: 80.0, main_monitor: 0, use_title_bar: true };
+    let values = TreeWMConfig { 
+        main_modifier: String::from("Super"),
+        gap: 80.0, 
+        focused_border_color: [255, 255, 255],
+        unfocused_border_color: [0, 0, 0],
+        main_monitor: 0, 
+        use_title_bar: true 
+    };
     let toml = to_string(&values).expect("Couldn't create toml values");
     let _ = create_dir_all(result_path.parent().ok_or_else(|| anyhow!("Parent path to config file path couldnt be found"))?);
     write(result_path, toml)?;

@@ -216,7 +216,6 @@ impl XdgShellHandler for Treewm {
 
             let grab = ResizeSurfaceGrab {
                 start_data,
-                window: cw.window.clone(),
                 window_surface: wl_surface.clone(),
                 initial_width: cw.base_width,
                 initial_height: cw.base_height,

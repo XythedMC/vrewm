@@ -1,5 +1,4 @@
 use smithay::{
-    desktop::Window,
     input::pointer::{
         AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
         GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -15,8 +14,6 @@ use crate::Treewm;
 
 pub struct ResizeSurfaceGrab {
     pub start_data: PointerGrabStartData<Treewm>,
-    /// The window being dragged.
-    pub window: Window,
     /// Cached surface so we can find the window in the canvas Vec efficiently.
     pub window_surface: WlSurface,
     /// The size of the window when the drag started.
@@ -187,7 +184,7 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
         handle.gesture_hold_end(data, event);
     }
 
-    fn unset(&mut self, data: &mut Treewm) { }
+    fn unset(&mut self, _data: &mut Treewm) { }
     
     fn start_data(&self) -> &PointerGrabStartData<Treewm> {
         &self.start_data

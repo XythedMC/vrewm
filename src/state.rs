@@ -96,6 +96,7 @@ pub struct Treewm {
     pub view_mode: ViewMode,
     pub zoom: f64,
     pub gap: f64,
+    pub config: TreeWMConfig,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -173,6 +174,7 @@ impl Treewm {
             view_mode: ViewMode::Tiling,
             zoom: 1.0,
             gap: config.gap,
+            config: config,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -330,17 +332,16 @@ impl Treewm {
             .iter()
             .map(|(&id, &(_, _, sw, sh))| (id, sw as i32, sh as i32))
             .collect();
-        for (id, sw, sh) in resize_ops {
-            let toplevel = self
-                .windows
-                .iter()
-                .find(|cw| cw.id == id)
-                .and_then(|cw| cw.window.toplevel());
-            if let Some(tl) = toplevel {
-                tl.with_pending_state(|s| { s.size = Some((sw, sh).into()); });
-                tl.send_pending_configure();
-            }
-        }
+        for (id, sw, sh) in resize_ops {                                                                                                               
+            if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {                                                                         
+                cw.base_width = sw;                                                                                                                    
+                cw.base_height = sh;                                                                                                                   
+                if let Some(tl) = cw.window.toplevel() {
+                    tl.with_pending_state(|s| { s.size = Some((sw, sh).into()); });                                                                    
+                    tl.send_pending_configure();                                                                                                       
+                }
+            }                                                                                                                                          
+        }  
 
         // Set animation targets.
         for cw in &mut self.windows {
