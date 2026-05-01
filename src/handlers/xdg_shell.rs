@@ -18,7 +18,7 @@ use smithay::{
     },
 };
 
-use crate::{grabs::MoveSurfaceGrab, state::{CanvasWindow, ViewMode}, Treewm};
+use crate::{Treewm, grabs::{MoveSurfaceGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ViewMode}};
 
 impl XdgShellHandler for Treewm {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -194,11 +194,39 @@ impl XdgShellHandler for Treewm {
 
     fn resize_request(
         &mut self,
-        _surface: ToplevelSurface,
-        _seat: wl_seat::WlSeat,
-        _serial: Serial,
-        _edges: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
     ) {
+        println!("resize_request called");
+        let seat = Seat::from_resource(&seat).unwrap();
+        let wl_surface = surface.wl_surface();
+
+        if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
+            let pointer = seat.get_pointer().unwrap();
+
+            let Some(cw) = self
+                .windows
+                .iter()
+                .find(|cw| cw.window.toplevel().map_or(false, |t| t.wl_surface() == wl_surface))
+            else {
+                return;
+            };
+
+            let grab = ResizeSurfaceGrab {
+                start_data,
+                window: cw.window.clone(),
+                window_surface: wl_surface.clone(),
+                initial_width: cw.base_width,
+                initial_height: cw.base_height,
+                initial_canvas_x: cw.canvas_x,
+                initial_canvas_y: cw.canvas_y,
+                grabbed_edge: edges,
+            };
+
+            pointer.set_grab(self, grab, serial, Focus::Clear)
+        }
     }
 
     fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}

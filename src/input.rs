@@ -7,11 +7,11 @@ use smithay::{
         keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::SERIAL_COUNTER,
+    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
+    utils::SERIAL_COUNTER, wayland::seat::WaylandFocus,
 };
 
-use crate::{Treewm, grabs::PanCanvasGrab, state::{ModifierKey, ViewMode}};
+use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{ModifierKey, ViewMode}};
 
 impl Treewm {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -224,6 +224,8 @@ impl Treewm {
                 let button_state = event.state();
 
                 const BTN_MIDDLE: u32 = 0x112;
+                const BTN_LEFT: u32 = 0x110;
+                
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_MIDDLE
                 {
@@ -237,6 +239,61 @@ impl Treewm {
                         initial_viewport_y: self.viewport_y,
                     };
                     pointer.set_grab(self, grab, serial, Focus::Clear);
+                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
+                    && button == BTN_LEFT
+                {
+                    let win_positions = self
+                        .windows
+                        .iter()
+                        .find(|cw|{
+                            let wx = (cw.canvas_x - self.viewport_x) as i32;
+                            let wy = (cw.canvas_y - self.viewport_y) as i32;
+                            let ww = cw.base_width as i32;
+                            let wh = cw.base_height as i32;
+                            let px = pointer.current_location().x as i32;
+                            let py = pointer.current_location().y as i32;
+
+                            !((wx..(wx+ww)).contains(&px) && (wy..(wy+wh)).contains(&py)) && ((wx-8..(wx+ww+8)).contains(&px) && (wy-8..wy+wh+8).contains(&py))
+                    });
+                    let mut edge: ResizeEdge = ResizeEdge::None;
+                    if let Some(cw) = win_positions {
+                        let wx = (cw.canvas_x - self.viewport_x) as i32;
+                        let wy = (cw.canvas_y - self.viewport_y) as i32;
+                        let ww = cw.base_width as i32;
+                        let wh = cw.base_height as i32;
+                        let px = pointer.current_location().x as i32;
+                        let py = pointer.current_location().y as i32;
+
+                        if px > wx + ww - 8 && py > wy + wh - 8 { edge = ResizeEdge::BottomRight; }
+                        else if px > wx + ww - 8 && py < wy + 8 { edge = ResizeEdge::TopRight; }
+                        else if px < wx + 8 && py < wy + 8 { edge = ResizeEdge::TopLeft; }
+                        else if px < wx + 8 && py > wy + wh - 8 { edge = ResizeEdge::BottomLeft; }
+                        else if px > wx + ww - 8 { edge = ResizeEdge::Right; }
+                        else if px < wx + 8 { edge = ResizeEdge::Left; }
+                        else if py > wy + wh - 8 { edge = ResizeEdge::Bottom; }
+                        else if py < wy + 8 { edge = ResizeEdge::Top; }
+
+                        let window = cw.window.clone();
+                        let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
+                        let w = cw.base_width;
+                        let h = cw.base_height;
+
+                        let grab = ResizeSurfaceGrab {
+                            start_data: PointerGrabStartData {
+                                focus: None,
+                                button: BTN_LEFT,
+                                location: pointer.current_location(),
+                            },
+                            window: window,
+                            window_surface: surface,
+                            initial_width: w,
+                            initial_height: h,
+                            initial_canvas_x: cw.canvas_x,
+                            initial_canvas_y: cw.canvas_y,
+                            grabbed_edge: edge, 
+                        };
+                        pointer.set_grab(self, grab, serial, Focus::Clear);
+                    }
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
                     if let Some((window, _loc)) = self
                         .space
