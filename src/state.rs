@@ -84,6 +84,10 @@ pub struct Treewm {
     /// Animated viewport destination.
     pub viewport_target_x: f64,
     pub viewport_target_y: f64,
+    pub zoom_anim_start: f64,
+    pub zoom_target: f64,
+    pub zoom_returning: bool,
+    pub zoom_animating: bool,
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
     /// When Some, a 300 ms cubic ease-out animation is in progress.
@@ -167,6 +171,10 @@ impl Treewm {
             viewport_target_y: 0.0,
             viewport_anim_start_x: 0.0,
             viewport_anim_start_y: 0.0,
+            zoom_anim_start: 1.0,
+            zoom_target: 1.0,
+            zoom_returning: false,
+            zoom_animating: false,
             anim_start: None,
             next_window_id: 0,
             focused_window_id: None,
@@ -589,10 +597,14 @@ impl Treewm {
             + (self.viewport_target_x - self.viewport_anim_start_x) * ease_t;
         self.viewport_y = self.viewport_anim_start_y
             + (self.viewport_target_y - self.viewport_anim_start_y) * ease_t;
-
-        if t >= 1.0 {
-            self.anim_start = None;
+        self.zoom = self.zoom_anim_start + (self.zoom_target - self.zoom_anim_start) * ease_t;
+        if t >= 1.0 && self.zoom_returning == false && self.zoom_animating {
+            self.zoom_target = 1.0;
+            self.zoom_anim_start = self.zoom;
+            self.zoom_returning = true;
+            self.anim_start = Some(Instant::now());
         }
+        else if self.zoom_returning == true && t >= 1.0 { self.zoom_animating = false; }
 
         self.sync_window_positions();
     }

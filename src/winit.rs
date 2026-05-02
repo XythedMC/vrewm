@@ -312,6 +312,7 @@ pub fn init_winit(
                 WinitEvent::Input(event) => state.process_input_event(event),
                 WinitEvent::Redraw => {
                     state.tick_animation();
+                    output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(state.zoom)), None);
 
                     // Import any DMABuf buffers that clients submitted since the last frame.
                     let pending = std::mem::take(&mut state.pending_dmabufs);

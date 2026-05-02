@@ -151,13 +151,21 @@ impl Treewm {
                 // Apply view mode toggle (keyboard mutex now released).
                 if toggle_view_mode {
                     self.view_mode = match self.view_mode {
-                        ViewMode::Tiling => ViewMode::TreeView,
+                        ViewMode::Tiling => {
+                            self.zoom_anim_start = self.zoom;
+                            self.zoom_target = 0.7;
+                            self.zoom_animating = true;
+                            ViewMode::TreeView
+                        },
                         ViewMode::TreeView => {
                             self.tiling_root_id = self.focused_window_id;
                             self.zoom = 1.0;
+                            self.zoom_target = 1.0;
+                            self.zoom_anim_start = 1.0;
                             if let Some(output) = self.space.outputs().next() {
                                 output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(self.zoom)), None);
                             }
+
                             ViewMode::Tiling
                         }
                     };
@@ -206,9 +214,10 @@ impl Treewm {
                 let serial = SERIAL_COUNTER.next_serial();
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                 let under = self.surface_under(pos);
+                let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
                 pointer.motion(
                     self,
-                    under,
+                    under.clone(),
                     &MotionEvent {
                         location: pos,
                         serial,
@@ -216,6 +225,22 @@ impl Treewm {
                     },
                 );
                 pointer.frame(self);
+
+                if self.config.hover_to_focus {
+                    if let Some((wl_surf, _)) = under {
+                        keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+
+                        self.focused_window_id = self
+                            .windows
+                            .iter()
+                            .find(|cw| {
+                                cw.window
+                                    .toplevel()
+                                    .map_or(false, |t| t.wl_surface() == &wl_surf)
+                            })
+                            .map(|cw| cw.id);
+                        }
+                }
             }
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
@@ -366,6 +391,7 @@ impl Treewm {
                     let old_zoom = self.zoom;
                     let zoom_factor = 1.1_f64.powf(-vertical_amount / 15.0);
                     self.zoom = (self.zoom * zoom_factor).clamp(0.2, 5.0);
+                    self.zoom_target = self.zoom;
 
                     self.viewport_x += pointer_loc.x - pointer_loc.x * (old_zoom / self.zoom);
                     self.viewport_y += pointer_loc.y - pointer_loc.y * (old_zoom / self.zoom);
