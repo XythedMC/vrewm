@@ -8,7 +8,7 @@ use smithay::{
         pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     },
     reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
-    utils::SERIAL_COUNTER, wayland::seat::WaylandFocus,
+    utils::SERIAL_COUNTER,
 };
 
 use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{ModifierKey, ViewMode}};

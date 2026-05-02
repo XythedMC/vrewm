@@ -3,13 +3,9 @@ use std::time::Duration;
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker,
-            element::Kind,
-            gles::{
-                element::PixelShaderElement,
-                GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType,
-            },
-            ImportDma, ImportEgl,
+            ImportDma, ImportEgl, damage::OutputDamageTracker, element::Kind, gles::{
+                GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement,
+            }
         },
         winit::{self, WinitEvent},
     },
@@ -67,6 +63,25 @@ void main() {
 }
 "#;
 
+const BORDER_FRAG: &str = r#"
+precision highp float;
+varying vec2 v_coords;
+uniform vec2 elem_size;
+uniform float radius;
+uniform vec4 u_color;
+uniform float thickness;
+
+void main() {
+    vec2 px = v_coords * elem_size;
+    vec2 p = px - elem_size / 2.0;
+
+    vec2 d = abs(p) - elem_size / 2.0 + vec2(radius);
+    float dist = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
+    if (dist > 0.0) { discard; }
+    if (dist < -thickness) { discard; }
+    gl_FragColor = vec4(u_color.rgb * u_color.a, u_color.a);
+}   
+"#;
 // ── Shader compilation ─────────────────────────────────────────────────────────
 
 fn compile_line(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
@@ -90,6 +105,20 @@ fn compile_solid(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
         &[UniformName::new("u_color", UniformType::_4f)],
     )
     .map_err(|e| eprintln!("treewm: solid shader compile failed: {e}"))
+    .ok()
+}
+
+fn compile_border(r: &mut GlesRenderer) -> Option<GlesPixelProgram> {
+        r.compile_custom_pixel_shader(
+        BORDER_FRAG,
+        &[
+            UniformName::new("elem_size", UniformType::_2f),
+            UniformName::new("radius", UniformType::_1f),
+            UniformName::new("thickness", UniformType::_1f),
+            UniformName::new("u_color", UniformType::_4f),
+        ],
+    )
+    .map_err(|e| eprintln!("treewm: border shader compile failed: {e}"))
     .ok()
 }
 
@@ -154,12 +183,12 @@ fn connector_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShade
 
 fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
     let fid = state.focused_window_id;
-    state.windows.iter().flat_map(|cw| {
+    state.windows.iter().map(|cw| {
         let sx = (cw.canvas_x - state.viewport_x) as i32;
         let sy = (cw.canvas_y - state.viewport_y) as i32;
         let ww = cw.base_width;
         let wh = cw.base_height;
-        let t = 2_i32;
+        let t = state.config.border_width;
         let mut color = [0.0, 0.0, 0.0, 1.0];
 
         if Some(cw.id) == fid {
@@ -171,23 +200,21 @@ fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelSh
             color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
         }
         
-        let rects = [
-            Rectangle { loc: (sx,       sy - t     ).into(), size: (ww,         t          ).into() },
-            Rectangle { loc: (sx,       sy + wh    ).into(), size: (ww,         t          ).into() },
-            Rectangle { loc: (sx - t,   sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
-            Rectangle { loc: (sx + ww,  sy - t     ).into(), size: (t,      wh + 2 * t     ).into() },
-        ];
+        let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
 
-        rects.iter().map(|&area| {
-            PixelShaderElement::new(
-                prog.clone(),
-                area,
-                None, // Damage = None means Smithay handles it or we force full redraw
-                1.0,
-                vec![Uniform::new("u_color", color)],
-                Kind::Unspecified,
-            )
-        }).collect::<Vec<_>>()
+        PixelShaderElement::new(
+            prog.clone(),
+            area,
+            None, // Damage = None means Smithay handles it or we force full redraw
+            1.0,
+            vec![
+                Uniform::new("u_color", color),
+                Uniform::new("elem_size", (ww as f32, wh as f32)),
+                Uniform::new("radius", state.config.corner_rounding),
+                Uniform::new("thickness", t as f32)
+            ],
+            Kind::Unspecified,
+        )
     }).collect()
 }
 
@@ -249,6 +276,7 @@ pub fn init_winit(
     // Compile overlay shaders once, before the event loop starts.
     let line_prog  = compile_line(backend.renderer());
     let solid_prog = compile_solid(backend.renderer());
+    let border_prog = compile_border(backend.renderer());
 
     // Advertise DMABuf formats. Use the renderer's own format set which is
     // correct for both Mesa (DMABuf) and NVIDIA (EGLStream) paths.
@@ -283,7 +311,6 @@ pub fn init_winit(
                 }
                 WinitEvent::Input(event) => state.process_input_event(event),
                 WinitEvent::Redraw => {
-                    println!("HIIIIIIIIII IM DRAWINGIGNIGNIGNIGNI");
                     state.tick_animation();
 
                     // Import any DMABuf buffers that clients submitted since the last frame.
@@ -316,10 +343,12 @@ pub fn init_winit(
                             }
                         }
                         if let Some(prog) = &solid_prog {
-                            overlays.extend(focus_border_elements(state, prog));
                             overlays.push(indicator_element(state, prog));
                         }
-
+                        if let Some(prog) = &border_prog {
+                            overlays.extend(focus_border_elements(state, prog));
+                        }
+                            
                         if let Err(e) = smithay::desktop::space::render_output::<
                             _,
                             PixelShaderElement,

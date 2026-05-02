@@ -11,7 +11,9 @@ pub struct TreeWMConfig {
     pub focused_border_color: [u8; 3],
     pub unfocused_border_color: [u8; 3],
     pub main_monitor: u8,
-    pub use_title_bar: bool
+    pub use_title_bar: bool,
+    pub corner_rounding: f32,
+    pub border_width: f32,
 }
 
 pub fn read_config() -> Result<TreeWMConfig, Error>{
@@ -31,12 +33,14 @@ pub fn create_config() -> anyhow::Result<()>{
         .join("treewm.toml");
 
     let values = TreeWMConfig { 
-        main_modifier: String::from("Super"),
+        main_modifier: String::from("Ctrl"),
         gap: 80.0, 
         focused_border_color: [255, 255, 255],
         unfocused_border_color: [0, 0, 0],
         main_monitor: 0, 
-        use_title_bar: true 
+        use_title_bar: true,
+        corner_rounding: 32.0,
+        border_width: 2.0,
     };
     let toml = to_string(&values).expect("Couldn't create toml values");
     let _ = create_dir_all(result_path.parent().ok_or_else(|| anyhow!("Parent path to config file path couldnt be found"))?);
