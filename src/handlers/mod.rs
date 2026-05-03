@@ -1,7 +1,8 @@
 mod compositor;
 mod xdg_shell;
 pub mod config;
-
+pub mod cursor_shape;
+pub mod tablet;
 use crate::Treewm;
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
@@ -38,8 +39,9 @@ impl SeatHandler for Treewm {
     fn cursor_image(
         &mut self,
         _seat: &Seat<Self>,
-        _image: smithay::input::pointer::CursorImageStatus,
+        image: smithay::input::pointer::CursorImageStatus,
     ) {
+        self.cursor_icon = image;
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {

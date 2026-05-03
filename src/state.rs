@@ -2,31 +2,21 @@ use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant};
 
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
+    delegate_cursor_shape,
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{Seat, SeatState},
+    input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
         wayland_server::{
-            backend::{ClientData, ClientId, DisconnectReason},
-            protocol::wl_surface::WlSurface,
-            Display, DisplayHandle,
+            Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
         },
     },
     utils::{Logical, Point, SERIAL_COUNTER},
     wayland::{
-        compositor::{CompositorClientState, CompositorState},
-        dmabuf::{DmabufState, ImportNotifier},
-        fractional_scale::FractionalScaleManagerState,
-        output::OutputManagerState,
-        selection::{
+        compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
-        },
-        shell::xdg::{XdgShellState, decoration::XdgDecorationState},
-        shm::ShmState,
-        socket::ListeningSocketSource,
-        viewporter::ViewporterState,
-        xdg_activation::XdgActivationState,
+        }, shell::xdg::{XdgShellState, decoration::XdgDecorationState}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState
     },
 };
 
@@ -101,9 +91,11 @@ pub struct Treewm {
     pub zoom: f64,
     pub gap: f64,
     pub config: TreeWMConfig,
+    pub cursor_icon: CursorImageStatus,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub cursor_shape_manager_state: CursorShapeManagerState,
     pub decoration_state: XdgDecorationState,
     pub activation_state: XdgActivationState,
     pub viewporter_state: ViewporterState,
@@ -131,6 +123,7 @@ impl Treewm {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
         let decoration_state = XdgDecorationState::new::<Self>(&dh);
         let activation_state = XdgActivationState::new::<Self>(&dh);
         let viewporter_state = ViewporterState::new::<Self>(&dh);
@@ -158,6 +151,7 @@ impl Treewm {
             "Alt" => ModifierKey::Alt,
             _ => panic!("Main modifier from config file isnt allowed, options are: Ctrl, Super, Shift and Alt")
         };
+        let cursor_icon = CursorImageStatus::default_named();
 
         Self {
             start_time,
@@ -182,10 +176,12 @@ impl Treewm {
             view_mode: ViewMode::Tiling,
             zoom: 1.0,
             gap: config.gap,
-            config: config,
+            config,
+            cursor_icon,
             socket_name,
             compositor_state,
             xdg_shell_state,
+            cursor_shape_manager_state,
             decoration_state,
             activation_state,
             viewporter_state,

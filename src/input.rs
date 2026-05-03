@@ -5,7 +5,7 @@ use smithay::{
     },
     input::{
         keyboard::{FilterResult, Keysym},
-        pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
+        pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent, CursorIcon, CursorImageStatus},
     },
     reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface, winit::keyboard::Key},
     utils::SERIAL_COUNTER,
@@ -231,20 +231,37 @@ impl Treewm {
                 );
                 pointer.frame(self);
 
-                if self.config.hover_to_focus {
-                    if let Some((wl_surf, _)) = under {
-                        keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                if let Some((wl_surf, _)) = under {           
+                    if let Some(window) = self.windows.iter().find(|cw| {
+                            cw.window
+                                .toplevel()
+                                .map_or(false, |t| t.wl_surface() == &wl_surf)
+                        }) {
+                        let window_id = window.id;
 
-                        self.focused_window_id = self
-                            .windows
-                            .iter()
-                            .find(|cw| {
-                                cw.window
-                                    .toplevel()
-                                    .map_or(false, |t| t.wl_surface() == &wl_surf)
-                            })
-                            .map(|cw| cw.id);
+                        let wx = (window.canvas_x - self.viewport_x) as i32;
+                        let wy = (window.canvas_y - self.viewport_y) as i32;
+                        let ww = window.base_width as i32;
+                        let wh = window.base_height as i32;
+                        let px = pointer.current_location().x as i32;
+                        let py = pointer.current_location().y as i32;
+
+                        if px > wx + ww - 8 && py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SeResize); }
+                        else if px > wx + ww - 8 && py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NeResize); }
+                        else if px < wx + 8 && py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NwResize); }
+                        else if px < wx + 8 && py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SwResize); }
+                        else if px > wx + ww - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::EResize); }
+                        else if px < wx + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::WResize); }
+                        else if py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SResize); }
+                        else if py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NResize); }
+                        else { self.cursor_icon = CursorImageStatus::default_named(); }
+
+                        if self.config.hover_to_focus {
+                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                            self.focused_window_id = Some(window_id);
                         }
+                    }
+                    
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -305,8 +322,6 @@ impl Treewm {
                         else if py < wy + 8 { edge = ResizeEdge::Top; }
 
                         let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
-                        let w = cw.base_width;
-                        let h = cw.base_height;
 
                         let grab = ResizeSurfaceGrab {
                             start_data: PointerGrabStartData {
@@ -315,8 +330,8 @@ impl Treewm {
                                 location: pointer.current_location(),
                             },
                             window_surface: surface,
-                            initial_width: w,
-                            initial_height: h,
+                            initial_width: ww,
+                            initial_height: wh,
                             initial_canvas_x: cw.canvas_x,
                             initial_canvas_y: cw.canvas_y,
                             grabbed_edge: edge, 

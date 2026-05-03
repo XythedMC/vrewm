@@ -8,10 +8,7 @@ use smithay::{
             }
         },
         winit::{self, WinitEvent},
-    },
-    output::{Mode, Output, PhysicalProperties, Subpixel},
-    reexports::calloop::EventLoop,
-    utils::{Rectangle, Transform},
+    }, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
 };
 
 use crate::{state::ViewMode, Treewm};
@@ -312,6 +309,11 @@ pub fn init_winit(
                 WinitEvent::Input(event) => state.process_input_event(event),
                 WinitEvent::Redraw => {
                     state.tick_animation();
+                    match &state.cursor_icon {
+                        CursorImageStatus::Hidden => backend.window().set_cursor_visible(false),
+                        CursorImageStatus::Named(cursor_icon) => backend.window().set_cursor(*cursor_icon),
+                        CursorImageStatus::Surface(_surface) => backend.window().set_cursor(CursorIcon::Default),
+                    }
                     output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(state.zoom)), None);
 
                     // Import any DMABuf buffers that clients submitted since the last frame.
