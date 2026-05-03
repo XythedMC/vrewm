@@ -67,6 +67,11 @@ impl XdgShellHandler for Treewm {
             tree_y: None,
             base_width: 800,
             base_height: 600,
+            is_fullscreen: false,
+            pre_fullscreen_x: 0.0,
+            pre_fullscreen_y: 0.0,
+            pre_fullscreen_width: 0,
+            pre_fullscreen_height: 0,
         });
 
         self.emit_event(crate::ipc::IpcEvent::WindowOpened {

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{iter::Skip, time::Duration};
 
 use smithay::{
     backend::{
@@ -160,6 +160,7 @@ fn connector_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShade
         .windows
         .iter()
         .filter_map(|cw| {
+            if cw.is_fullscreen { return None; }
             let pid    = cw.parent_id?;
             let parent = state.windows.iter().find(|p| p.id == pid)?;
 

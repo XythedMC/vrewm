@@ -144,9 +144,14 @@ impl Treewm {
                         }
 
                         // ── Focus zoom (Ctrl + F, tree view) ────────────────────
-                        if main_mod && sym == Keysym::f {
+                        if main_mod && sym == Keysym::z {
                             focus_zoom_requested = true;
                             return FilterResult::Intercept(());
+                        }
+
+                        if main_mod && sym == Keysym::f {
+                            data.toggle_fullscreen();
+                            return FilterResult::Intercept(())
                         }
 
                         FilterResult::Forward

@@ -58,6 +58,12 @@ pub struct CanvasWindow {
     pub tree_y: Option<f64>,
     pub base_width: i32,
     pub base_height: i32,
+
+    pub is_fullscreen: bool,
+    pub pre_fullscreen_x: f64,
+    pub pre_fullscreen_y: f64,
+    pub pre_fullscreen_width: i32,
+    pub pre_fullscreen_height: i32,
 }
 
 pub struct Treewm {
@@ -74,10 +80,12 @@ pub struct Treewm {
     /// Animated viewport destination.
     pub viewport_target_x: f64,
     pub viewport_target_y: f64,
+
     pub zoom_anim_start: f64,
     pub zoom_target: f64,
     pub zoom_returning: bool,
     pub zoom_animating: bool,
+
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
     /// When Some, a 300 ms cubic ease-out animation is in progress.
@@ -317,6 +325,41 @@ impl Treewm {
             (800.0, 600.0)
         } else {
             (w, h)
+        }
+    }
+
+    pub fn toggle_fullscreen(&mut self) {
+        let (sw, sh) = self.output_size();
+        let cw = self
+            .windows
+            .iter_mut()
+            .find(|cw| Some(cw.id) == self.focused_window_id);
+        if let Some(window) = cw {
+            if window.is_fullscreen == false {
+                window.pre_fullscreen_x = window.canvas_x;                                                                            
+                window.pre_fullscreen_y = window.canvas_y;                                                                            
+                window.pre_fullscreen_width = window.base_width;                                                                      
+                window.pre_fullscreen_height = window.base_height;
+                
+                (window.target_x, window.target_y) = (self.viewport_x, self.viewport_y);
+                (window.base_width, window.base_height) = (sw as i32, sh as i32);
+
+                if let Some(tl) = window.window.toplevel() {
+                    tl.with_pending_state(|s| s.size = Some((sw as i32, sh as i32).into()));
+                    tl.send_pending_configure();
+                }
+                window.is_fullscreen = true;
+            } else {
+                window.canvas_x = window.pre_fullscreen_x;                                                                            
+                window.canvas_y = window.pre_fullscreen_y;                                                                            
+                window.base_width = window.pre_fullscreen_width;                                                                      
+                window.base_height = window.pre_fullscreen_height;
+                if let Some(tl) = window.window.toplevel() {
+                    tl.with_pending_state(|s| s.size = Some((window.pre_fullscreen_width, window.pre_fullscreen_height).into()));
+                    tl.send_pending_configure();
+                }
+                window.is_fullscreen = false;
+            }
         }
     }
 
