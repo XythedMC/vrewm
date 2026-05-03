@@ -208,8 +208,7 @@ impl Treewm {
         display: Display<Treewm>,
         event_loop: &mut EventLoop<Self>,
     ) -> OsString {
-        let listening_socket = ListeningSocketSource::new_auto().expect("Couldn't create new Wayland listening socket as all sockets are taken");
-        let socket_name = listening_socket.socket_name().to_os_string();
+        let listening_socket = ListeningSocketSource::with_name("wayland-treewm").expect("Couldn't initialize wayland socket because all sockets were already taken");
         let loop_handle = event_loop.handle();
 
         loop_handle
@@ -233,7 +232,7 @@ impl Treewm {
             )
             .expect("Failed to insert display into the loop");
 
-        socket_name
+        "wayland-treewm".into()
     }
 
     // ── IDs ────────────────────────────────────────────────────────────────

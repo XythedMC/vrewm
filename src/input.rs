@@ -7,7 +7,7 @@ use smithay::{
         keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     },
-    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
+    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface, winit::keyboard::Key},
     utils::SERIAL_COUNTER,
 };
 
@@ -88,6 +88,11 @@ impl Treewm {
                                 }
                                 return FilterResult::Intercept(());
                             }
+                        }
+
+                        if main_mod && modifiers.alt && sym == Keysym::BackSpace {
+                            data.loop_signal.stop();
+                            return FilterResult::Intercept(());
                         }
 
                         // ── View mode toggle (Ctrl + Space) ─────────────────────
