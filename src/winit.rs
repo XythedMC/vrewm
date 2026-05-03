@@ -11,7 +11,7 @@ use smithay::{
     }, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
 };
 
-use crate::{state::ViewMode, Treewm};
+use crate::{Treewm, state::{BackgroundType, ViewMode}};
 
 smithay::backend::renderer::element::render_elements! {
     TreewmElement <=GlesRenderer>;
@@ -376,7 +376,8 @@ pub fn init_winit(
                                 );
                             }
                         }
-
+                        let background_color = state.config.background_color;
+                        let color = background_color.map(|x| x as f32 / 255.0);
                         if let Err(e) = smithay::desktop::space::render_output::<
                             _,
                             TreewmElement,
@@ -391,7 +392,7 @@ pub fn init_winit(
                             [&state.space],
                             &overlays,
                             &mut damage_tracker,
-                            [0.1, 0.1, 0.1, 1.0],
+                            if state.background_type != BackgroundType::Color { [0.1, 0.1, 0.1, 1.0] } else { [color[0], color[1], color[2], 1.0] },
                         ) {
                             eprintln!("treewm: render error: {e}");
                             return;

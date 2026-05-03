@@ -35,6 +35,13 @@ pub enum ModifierKey {
     Shift,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum BackgroundType {
+    Color,
+    Image,
+    Shader,
+}
+
 /// A window with its position on the infinite canvas and its place in the window tree.
 pub struct CanvasWindow {
     pub id: u32,
@@ -100,6 +107,7 @@ pub struct Treewm {
     pub config: TreeWMConfig,
     pub cursor_icon: CursorImageStatus,
     pub layer_surfaces: Vec<LayerSurface>,
+    pub background_type: BackgroundType,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -163,6 +171,14 @@ impl Treewm {
         };
         let cursor_icon = CursorImageStatus::default_named();
         let layer_surfaces = Vec::new();
+
+        let background_type = match config.background_type.as_str() {
+            "color" => BackgroundType::Color,
+            "image" => BackgroundType::Image,
+            "shader" => BackgroundType::Shader,
+            _ => panic!("Selected background type is not allowed! Only options are 'color', 'image' and 'shader'")
+        };
+
         Self {
             start_time,
             display_handle: dh,
@@ -189,6 +205,7 @@ impl Treewm {
             config,
             cursor_icon,
             layer_surfaces,
+            background_type,
             socket_name,
             compositor_state,
             xdg_shell_state,

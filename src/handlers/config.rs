@@ -2,7 +2,7 @@
 use toml::{from_str, to_string};
 use serde::{Serialize, Deserialize};
 use anyhow::{Error, anyhow};
-use std::fs::{read_to_string, create_dir_all, write};
+use std::{fs::{create_dir_all, read_to_string, write}, path::Path};
 use dirs::config_dir;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TreeWMConfig {
@@ -10,8 +10,10 @@ pub struct TreeWMConfig {
     pub gap: f64,
     pub focused_border_color: [u8; 3],
     pub unfocused_border_color: [u8; 3],
-    pub main_monitor: u8,
-    pub use_title_bar: bool,
+    pub background_type: String,
+    pub background_color: [u8; 3],
+    pub background_image: String,
+    pub background_shader: String,
     pub corner_rounding: f32,
     pub border_width: f32,
     pub hover_to_focus: bool
@@ -38,8 +40,10 @@ pub fn create_config() -> anyhow::Result<()>{
         gap: 80.0, 
         focused_border_color: [255, 255, 255],
         unfocused_border_color: [0, 0, 0],
-        main_monitor: 0, 
-        use_title_bar: true,
+        background_type: String::from("color"),
+        background_color: [26, 26, 26],
+        background_image: String::from(""),
+        background_shader: String::from(""),
         corner_rounding: 32.0,
         border_width: 2.0,
         hover_to_focus: true,
