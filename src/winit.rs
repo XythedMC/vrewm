@@ -1,9 +1,9 @@
-use std::{iter::Skip, time::Duration};
+use std::time::Duration;
 
 use smithay::{
     backend::{
         renderer::{
-            ImportDma, ImportEgl, damage::OutputDamageTracker, element::Kind, gles::{
+            ImportAll, ImportDma, ImportEgl, damage::OutputDamageTracker, element::{Kind, surface::WaylandSurfaceRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement,
             }
         },
@@ -12,6 +12,12 @@ use smithay::{
 };
 
 use crate::{state::ViewMode, Treewm};
+
+smithay::backend::renderer::element::render_elements! {
+    TreewmElement <=GlesRenderer>;
+    Shader = PixelShaderElement,
+    Surface = WaylandSurfaceRenderElement<GlesRenderer>,
+}
 
 // ── Shader sources ─────────────────────────────────────────────────────────────
 // compile_custom_pixel_shader prepends "#version 100\n" — do NOT include it here.
@@ -339,23 +345,41 @@ pub fn init_winit(
                         };
 
                         // Assemble overlay elements for this frame.
-                        let mut overlays: Vec<PixelShaderElement> = Vec::new();
+                        let mut overlays: Vec<TreewmElement> = Vec::new();
 
                         if state.view_mode == ViewMode::TreeView {
                             if let Some(prog) = &line_prog {
-                                overlays.extend(connector_elements(state, prog));
+                                overlays.extend(connector_elements(state, prog).into_iter().map(TreewmElement::Shader));
                             }
                         }
                         if let Some(prog) = &solid_prog {
-                            overlays.push(indicator_element(state, prog));
+                            overlays.push(TreewmElement::Shader(indicator_element(state, prog)));
                         }
                         if let Some(prog) = &border_prog {
-                            overlays.extend(focus_border_elements(state, prog));
+                            overlays.extend(focus_border_elements(state, prog).into_iter().map(TreewmElement::Shader));
                         }
-                            
+
+                        // Render layer surfaces (wlr-layer-shell: background/bottom/top/overlay).
+                        {
+                            use smithay::backend::renderer::element::AsRenderElements;
+                            let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
+                            let layer_map = smithay::desktop::layer_map_for_output(&output);
+                            for layer in layer_map.layers() {
+                                let loc = layer_map.layer_geometry(layer).unwrap_or_default().loc;
+                                overlays.extend(
+                                    layer.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                                        renderer,
+                                        loc.to_physical_precise_round(scale),
+                                        scale,
+                                        1.0,
+                                    ).into_iter().map(TreewmElement::Surface)
+                                );
+                            }
+                        }
+
                         if let Err(e) = smithay::desktop::space::render_output::<
                             _,
-                            PixelShaderElement,
+                            TreewmElement,
                             _,
                             _,
                         >(
@@ -388,7 +412,21 @@ pub fn init_winit(
                         )
                     });
 
+                    // Send frames to layer surfaces and refresh the layer map.
+                    {
+                        let layer_map = smithay::desktop::layer_map_for_output(&output);
+                        for layer in layer_map.layers() {
+                            layer.send_frame(
+                                &output,
+                                state.start_time.elapsed(),
+                                Some(Duration::ZERO),
+                                |_, _| Some(output.clone()),
+                            );
+                        }
+                    }
+
                     state.space.refresh();
+                    smithay::desktop::layer_map_for_output(&output).cleanup();
                     state.popups.cleanup();
                     let _ = state.display_handle.flush_clients();
 

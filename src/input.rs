@@ -7,7 +7,7 @@ use smithay::{
         keyboard::{FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent, CursorIcon, CursorImageStatus},
     },
-    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface, winit::keyboard::Key},
+    reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
     utils::SERIAL_COUNTER,
 };
 

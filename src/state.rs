@@ -2,8 +2,7 @@ use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant};
 
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
-    delegate_cursor_shape,
-    desktop::{PopupManager, Space, Window, WindowSurfaceType},
+    desktop::{PopupManager, Space, Window, WindowSurfaceType, LayerSurface},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
@@ -16,7 +15,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
-        }, shell::xdg::{XdgShellState, decoration::XdgDecorationState}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState
+        }, shell::{wlr_layer::{WlrLayerShellState}, xdg::{XdgShellState, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState,
     },
 };
 
@@ -100,10 +99,12 @@ pub struct Treewm {
     pub gap: f64,
     pub config: TreeWMConfig,
     pub cursor_icon: CursorImageStatus,
+    pub layer_surfaces: Vec<LayerSurface>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
+    pub wlr_layer_shell_state: WlrLayerShellState,
     pub decoration_state: XdgDecorationState,
     pub activation_state: XdgActivationState,
     pub viewporter_state: ViewporterState,
@@ -132,6 +133,7 @@ impl Treewm {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&dh);
+        let wlr_layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let decoration_state = XdgDecorationState::new::<Self>(&dh);
         let activation_state = XdgActivationState::new::<Self>(&dh);
         let viewporter_state = ViewporterState::new::<Self>(&dh);
@@ -160,7 +162,7 @@ impl Treewm {
             _ => panic!("Main modifier from config file isnt allowed, options are: Ctrl, Super, Shift and Alt")
         };
         let cursor_icon = CursorImageStatus::default_named();
-
+        let layer_surfaces = Vec::new();
         Self {
             start_time,
             display_handle: dh,
@@ -186,10 +188,12 @@ impl Treewm {
             gap: config.gap,
             config,
             cursor_icon,
+            layer_surfaces,
             socket_name,
             compositor_state,
             xdg_shell_state,
             cursor_shape_manager_state,
+            wlr_layer_shell_state,
             decoration_state,
             activation_state,
             viewporter_state,

@@ -3,6 +3,7 @@ mod xdg_shell;
 pub mod config;
 pub mod cursor_shape;
 pub mod tablet;
+pub mod layer_shell;
 use crate::Treewm;
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
