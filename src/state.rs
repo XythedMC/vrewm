@@ -62,6 +62,8 @@ pub struct CanvasWindow {
     /// Manually saved positions for TreeView mode.
     pub tree_x: Option<f64>,
     pub tree_y: Option<f64>,
+    pub tree_width: i32,
+    pub tree_height: i32,
     pub base_width: i32,
     pub base_height: i32,
 
@@ -401,8 +403,8 @@ impl Treewm {
             .collect();
         for (id, sw, sh) in resize_ops {                                                                                                               
             if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {                                                                         
-                cw.base_width = sw;                                                                                                                    
-                cw.base_height = sh;                                                                                                                   
+                cw.base_width = sw - 2 * self.config.tile_distance;                                                                                                                    
+                cw.base_height = sh - 2 * self.config.tile_distance;                                                                                                                   
                 if let Some(tl) = cw.window.toplevel() {
                     tl.with_pending_state(|s| { s.size = Some((sw, sh).into()); });                                                                    
                     tl.send_pending_configure();                                                                                                       
@@ -413,8 +415,8 @@ impl Treewm {
         // Set animation targets.
         for cw in &mut self.windows {
             if let Some(&(tx, ty, _, _)) = slots.get(&cw.id) {
-                cw.target_x = tx;
-                cw.target_y = ty;
+                cw.target_x = tx + self.config.tile_distance as f64;
+                cw.target_y = ty + self.config.tile_distance as f64;
             } else {
                 self.space.unmap_elem(&cw.window);
             }
@@ -495,12 +497,14 @@ impl Treewm {
         }
 
         // Resize every window to its base size.
-        let toplevel_ops: Vec<(u32, i32, i32)> = self.windows.iter().map(|cw| (cw.id, cw.base_width, cw.base_height)).collect();
-        for (id, bw, bh) in toplevel_ops {
-            if let Some(cw) = self.windows.iter().find(|cw| cw.id == id) {
+        let toplevel_ops: Vec<(u32, i32, i32)> = self.windows.iter().map(|cw| (cw.id, cw.tree_width, cw.tree_height)).collect();
+        for (id, tw, th) in toplevel_ops {
+            if let Some(cw) = self.windows.iter_mut().find(|cw| cw.id == id) {
+                cw.base_width = tw;
+                cw.base_height = th;
                 if let Some(tl) = cw.window.toplevel() {
                     tl.with_pending_state(|s| {
-                        s.size = Some((bw, bh).into());
+                        s.size = Some((tw, th).into());
                     });
                     tl.send_pending_configure();
                 }

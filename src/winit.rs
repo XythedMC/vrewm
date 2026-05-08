@@ -3,7 +3,7 @@ use std::time::Duration;
 use smithay::{
     backend::{
         renderer::{
-            ImportAll, ImportDma, ImportEgl, damage::OutputDamageTracker, element::{Kind, surface::WaylandSurfaceRenderElement}, gles::{
+            ImportDma, ImportEgl, damage::OutputDamageTracker, element::{Kind, surface::WaylandSurfaceRenderElement}, gles::{
                 GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement,
             }
         },

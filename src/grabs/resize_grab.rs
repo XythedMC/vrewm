@@ -62,6 +62,8 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
             {
                 cw.base_height = new_height;
                 cw.base_width = new_width;
+                cw.tree_width = new_width;
+                cw.tree_height = new_height;
                 cw.canvas_x = canvas_x;
                 cw.target_x = canvas_x;
                 cw.canvas_y = canvas_y;

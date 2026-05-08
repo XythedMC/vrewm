@@ -36,6 +36,10 @@ impl XdgShellHandler for Treewm {
         // Parent = currently focused window; None means new tree root.
         let parent_id = self.focused_window_id;
 
+        let (initial_w, initial_h) = surface.with_pending_state(|state| {
+            let size = state.size.unwrap_or((800, 600).into());
+            (size.w, size.h)
+        });
         let (cx, cy) = self.viewport_center();
         let canvas_x = cx - 400.0;
         let canvas_y = cy - 300.0;
@@ -65,8 +69,10 @@ impl XdgShellHandler for Treewm {
             children: Vec::new(),
             tree_x: None,
             tree_y: None,
-            base_width: 800,
-            base_height: 600,
+            tree_width: initial_w,
+            tree_height: initial_h,
+            base_width: initial_w,
+            base_height: initial_h,
             is_fullscreen: false,
             pre_fullscreen_x: 0.0,
             pre_fullscreen_y: 0.0,
@@ -222,8 +228,8 @@ impl XdgShellHandler for Treewm {
             let grab = ResizeSurfaceGrab {
                 start_data,
                 window_surface: wl_surface.clone(),
-                initial_width: cw.base_width,
-                initial_height: cw.base_height,
+                initial_width: cw.tree_width,
+                initial_height: cw.tree_height,
                 initial_canvas_x: cw.canvas_x,
                 initial_canvas_y: cw.canvas_y,
                 grabbed_edge: edges,

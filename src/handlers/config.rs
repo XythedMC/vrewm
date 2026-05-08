@@ -15,6 +15,7 @@ pub struct TreeWMConfig {
     pub background_image: String,
     pub background_shader: String,
     pub corner_rounding: f32,
+    pub tile_distance: i32,
     pub border_width: f32,
     pub hover_to_focus: bool
 }
@@ -45,6 +46,7 @@ pub fn create_config() -> anyhow::Result<()>{
         background_image: String::from(""),
         background_shader: String::from(""),
         corner_rounding: 32.0,
+        tile_distance: 8,
         border_width: 2.0,
         hover_to_focus: true,
     };
