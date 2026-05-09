@@ -19,6 +19,7 @@ pub struct TreeWMConfig {
     pub border_width: f32,
     pub hover_to_focus: bool,
     pub default_terminal: String,
+    pub client_side_decorations: bool,
 }
 
 pub fn read_config() -> Result<TreeWMConfig, Error>{
@@ -50,7 +51,8 @@ pub fn create_config() -> anyhow::Result<()>{
         tile_distance: 8,
         border_width: 2.0,
         hover_to_focus: true,
-        default_terminal: String::from("ghostty"),
+        default_terminal: String::from("kitty"),
+        client_side_decorations: false,
     };
     let toml = to_string(&values).expect("Couldn't create toml values");
     let _ = create_dir_all(result_path.parent().ok_or_else(|| anyhow!("Parent path to config file path couldnt be found"))?);

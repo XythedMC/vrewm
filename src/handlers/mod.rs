@@ -106,19 +106,31 @@ delegate_primary_selection!(Treewm);
 impl XdgDecorationHandler for Treewm {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            if self.config.client_side_decorations {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            } else {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+            }
         });
         toplevel.send_pending_configure();
     }
     fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: zxdg_toplevel_decoration_v1::Mode) {
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            if self.config.client_side_decorations {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            } else {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+            }
         });
         toplevel.send_pending_configure();
     }
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            if self.config.client_side_decorations {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+            } else {
+                state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ServerSide);
+            }
         });
         toplevel.send_pending_configure();
     }
