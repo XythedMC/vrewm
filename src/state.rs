@@ -1,8 +1,8 @@
-use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant};
+use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant, process::Command};
 
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
-    desktop::{PopupManager, Space, Window, WindowSurfaceType, LayerSurface},
+    desktop::{LayerSurface, PopupKind, PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
@@ -15,7 +15,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
             primary_selection::PrimarySelectionState,
-        }, shell::{wlr_layer::{WlrLayerShellState}, xdg::{XdgShellState, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState,
+        }, shell::{wlr_layer::WlrLayerShellState, xdg::{XdgShellState, decoration::XdgDecorationState}}, shm::ShmState, socket::ListeningSocketSource, viewporter::ViewporterState, xdg_activation::XdgActivationState,
     },
 };
 
@@ -108,6 +108,7 @@ pub struct Treewm {
     pub gap: f64,
     pub config: TreeWMConfig,
     pub cursor_icon: CursorImageStatus,
+    pub cursor_position: Point<f64, Logical>,
     pub layer_surfaces: Vec<LayerSurface>,
     pub background_type: BackgroundType,
 
@@ -206,6 +207,7 @@ impl Treewm {
             gap: config.gap,
             config,
             cursor_icon,
+            cursor_position: Point::new(0.0, 0.0),
             layer_surfaces,
             background_type,
             socket_name,
@@ -262,7 +264,7 @@ impl Treewm {
         "wayland-treewm".into()
     }
 
-    // ── IDs ────────────────────────────────────────────────────────────────
+    // - IDs --------------------------------
 
     pub fn alloc_id(&mut self) -> u32 {
         let id = self.next_window_id;
@@ -270,7 +272,7 @@ impl Treewm {
         id
     }
 
-    // ── Focus ──────────────────────────────────────────────────────────────
+    // - Focus -------------------------------
 
     /// Set keyboard focus to the window with this ID and update our tracking field.
     pub fn focus_by_id(&mut self, id: u32) {
@@ -299,7 +301,7 @@ impl Treewm {
         keyboard.set_focus(self, Option::<WlSurface>::None, serial);
     }
 
-    // ── Tree queries ───────────────────────────────────────────────────────
+    // - Tree queries ---------------------------─
 
     /// Siblings of `id` in tree order (includes `id` itself).
     /// For roots the siblings are all other roots.
@@ -326,7 +328,7 @@ impl Treewm {
         }
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────
+    // - Layout ------------------------------
 
     pub fn apply_layout(&mut self) {
         match self.view_mode {
@@ -588,8 +590,22 @@ impl Treewm {
             child_x += cw + gap;
         }
     }
+    
+    // -- Launch Apps --------------------------------
+    pub fn launch_terminal(&mut self) {
+        let (x, y) = (self.cursor_position.x, self.cursor_position.y);
+        let socket_str = self.socket_name.to_string_lossy().to_string();
 
-    // ── Canvas / viewport ─────────────────────────────────────────────────
+        match Command::new(self.config.default_terminal.as_str())
+            .env("WAYLAND_DISPLAY", &socket_str)
+            .spawn()
+        {
+            Ok(_) => println!("Spawned kitty at ({}, {})", x, y),
+            Err(e) => tracing::error!("Failed to spawn kitty: {}", e),
+        }
+    }
+
+    // -- Canvas / viewport ------------------------------
 
     pub fn viewport_center(&self) -> (f64, f64) {
         let (w, h) = self
@@ -630,7 +646,7 @@ impl Treewm {
         }
     }
 
-    // ── Animation ─────────────────────────────────────────────────────────
+    // -- Animation -----------------------------
 
     /// Snapshot current canvas and viewport positions as animation start, begin 200 ms animation.
     pub fn begin_animation(&mut self) {
@@ -760,7 +776,7 @@ impl Treewm {
         })
     }
 
-    // ── IPC ───────────────────────────────────────────────────────────────
+    // - IPC -------------------------------─
     pub fn emit_event(&self, event: crate::ipc::IpcEvent) {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(event);
@@ -847,7 +863,7 @@ impl Treewm {
         }
     }
 
-    // ── Debug output ───────────────────────────────────────────────────────
+    // - Debug output ---------------------------─
 
     pub fn print_tree(&self) {
         eprintln!("=== Window Tree ===");

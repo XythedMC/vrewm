@@ -9,7 +9,6 @@ pub use state::Treewm;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use tracing_subscriber::EnvFilter;
-
 use crate::handlers::config::{create_config, read_config};
 
 fn main() -> anyhow::Result<()>{

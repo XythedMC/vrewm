@@ -90,6 +90,7 @@ impl Treewm {
                             }
                         }
 
+                        // ── Gentle loop stopping ────────────────────
                         if main_mod && modifiers.alt && sym == Keysym::BackSpace {
                             data.loop_signal.stop();
                             return FilterResult::Intercept(());
@@ -98,6 +99,12 @@ impl Treewm {
                         // ── View mode toggle (Ctrl + Space) ─────────────────────
                         if main_mod && sym == Keysym::space {
                             toggle_view_mode = true;
+                            return FilterResult::Intercept(());
+                        }
+
+                        // ── Spawn kitty ────────────────
+                        if main_mod && sym == Keysym::Return {
+                            data.launch_terminal();
                             return FilterResult::Intercept(());
                         }
 
@@ -235,7 +242,7 @@ impl Treewm {
                     },
                 );
                 pointer.frame(self);
-
+                self.cursor_position = pointer.current_location();
                 if let Some((wl_surf, _)) = under {           
                     if let Some(window) = self.windows.iter().find(|cw| {
                             cw.window

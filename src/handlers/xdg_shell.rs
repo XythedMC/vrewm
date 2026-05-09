@@ -40,13 +40,13 @@ impl XdgShellHandler for Treewm {
             let size = state.size.unwrap_or((800, 600).into());
             (size.w, size.h)
         });
-        let (cx, cy) = self.viewport_center();
-        let canvas_x = cx - 400.0;
-        let canvas_y = cy - 300.0;
+
+        let canvas_x = self.cursor_position.x + self.viewport_x;
+        let canvas_y = self.cursor_position.y + self.viewport_y;
 
         let window = Window::new_wayland_window(surface);
-        let screen_x = (canvas_x - self.viewport_x) as i32;
-        let screen_y = (canvas_y - self.viewport_y) as i32;
+        let screen_x = self.cursor_position.x as i32;
+        let screen_y = self.cursor_position.y as i32;
         self.space.map_element(window.clone(), (screen_x, screen_y), true);
 
         // Register this window as a child of its parent.

@@ -2,7 +2,7 @@
 use toml::{from_str, to_string};
 use serde::{Serialize, Deserialize};
 use anyhow::{Error, anyhow};
-use std::{fs::{create_dir_all, read_to_string, write}, path::Path};
+use std::{fs::{create_dir_all, read_to_string, write}};
 use dirs::config_dir;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TreeWMConfig {
@@ -17,7 +17,8 @@ pub struct TreeWMConfig {
     pub corner_rounding: f32,
     pub tile_distance: i32,
     pub border_width: f32,
-    pub hover_to_focus: bool
+    pub hover_to_focus: bool,
+    pub default_terminal: String,
 }
 
 pub fn read_config() -> Result<TreeWMConfig, Error>{
@@ -49,6 +50,7 @@ pub fn create_config() -> anyhow::Result<()>{
         tile_distance: 8,
         border_width: 2.0,
         hover_to_focus: true,
+        default_terminal: String::from("ghostty"),
     };
     let toml = to_string(&values).expect("Couldn't create toml values");
     let _ = create_dir_all(result_path.parent().ok_or_else(|| anyhow!("Parent path to config file path couldnt be found"))?);
