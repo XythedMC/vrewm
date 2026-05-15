@@ -73,6 +73,11 @@ impl XdgShellHandler for Treewm {
             tree_height: initial_h,
             base_width: initial_w,
             base_height: initial_h,
+            resize_edge: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge::None,
+            resize_initial_x: 0.0,
+            resize_initial_y: 0.0,
+            resize_initial_w: 0,
+            resize_initial_h: 0,
             is_fullscreen: false,
             pre_fullscreen_x: 0.0,
             pre_fullscreen_y: 0.0,
@@ -217,22 +222,29 @@ impl XdgShellHandler for Treewm {
         if let Some(start_data) = check_grab(&seat, wl_surface, serial) {
             let pointer = seat.get_pointer().unwrap();
 
-            let Some(cw) = self
+            let Some(cw_id) = self
                 .windows
                 .iter()
                 .find(|cw| cw.window.toplevel().map_or(false, |t| t.wl_surface() == wl_surface))
+                .map(|cw| cw.id)
             else {
                 return;
             };
+
+            let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
+            cw.resize_edge = edges;
+            cw.resize_initial_x = cw.canvas_x;
+            cw.resize_initial_y = cw.canvas_y;
+            cw.resize_initial_w = cw.tree_width;
+            cw.resize_initial_h = cw.tree_height;
 
             let grab = ResizeSurfaceGrab {
                 start_data,
                 window_surface: wl_surface.clone(),
                 initial_width: cw.tree_width,
                 initial_height: cw.tree_height,
-                initial_canvas_x: cw.canvas_x,
-                initial_canvas_y: cw.canvas_y,
                 grabbed_edge: edges,
+                last_update: std::time::Instant::now(),
             };
 
             pointer.set_grab(self, grab, serial, Focus::Clear)

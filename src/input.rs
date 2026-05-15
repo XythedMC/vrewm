@@ -11,10 +11,43 @@ use smithay::{
     utils::SERIAL_COUNTER,
 };
 
-use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{ModifierKey, ViewMode}};
+use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ModifierKey, ViewMode}};
 
 impl Treewm {
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {        
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {   
+        fn window_edge_at(
+            cw: &CanvasWindow,
+            px: i32, py: i32,
+            viewport_x: f64, viewport_y: f64,
+            zoom: f64,
+        ) -> ResizeEdge {
+            let mut edge = ResizeEdge::None;
+            let wx = (cw.canvas_x - viewport_x) as i32;
+            let wy = (cw.canvas_y - viewport_y) as i32;
+            let ww = cw.base_width as i32;
+            let wh = cw.base_height as i32;
+            
+            let margin = (8.0 / zoom) as i32;
+            let in_right  = px >= wx + ww - margin  && px < wx + ww + margin && py >= wy - margin && py <= wy + wh + margin;
+            let in_left   = px >= wx - margin       && px < wx + margin      && py >= wy - margin && py <= wy + wh + margin;
+            let in_bottom = py >= wy + wh - margin  && py < wy + wh + margin && px >= wx - margin && px <= wx + ww + margin;
+            let in_top    = py >= wy - margin       && py < wy + margin      && px >= wx - margin && px <= wx + ww + margin;
+
+            
+            eprintln!("zoom={zoom:.3} px={px} py={py} | wx={wx} wx+ww={} wy={wy} wy+wh={} margin={margin} | l={in_left} r={in_right} t={in_top} b={in_bottom}",
+                wx+ww, wy+wh);
+
+            if      in_right && in_bottom { edge = ResizeEdge::BottomRight; }
+            else if in_right && in_top { edge = ResizeEdge::TopRight; }
+            else if in_left && in_top { edge = ResizeEdge::TopLeft; }
+            else if in_left && in_bottom { edge = ResizeEdge::BottomLeft; }
+            else if in_right { edge = ResizeEdge::Right; }
+            else if in_left { edge = ResizeEdge::Left; }
+            else if in_bottom { edge = ResizeEdge::Bottom; }
+            else if in_top { edge = ResizeEdge::Top; }
+            return edge;
+        } 
+
         match event {
             InputEvent::Keyboard { event, .. } => {
                 
@@ -226,6 +259,7 @@ impl Treewm {
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
                 let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
+
                 let pos =
                     event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
                 let serial = SERIAL_COUNTER.next_serial();
@@ -243,37 +277,47 @@ impl Treewm {
                 );
                 pointer.frame(self);
                 self.cursor_position = pointer.current_location();
-                if let Some((wl_surf, _)) = under {           
+                {
+                    let mut new_icon = CursorImageStatus::default_named();
+                    let px = pointer.current_location().x as i32;
+                    let py = pointer.current_location().y as i32;
+                    for window in self.windows.iter().rev() {
+                        match window_edge_at(window, px, py, self.viewport_x, self.viewport_y, self.zoom) {
+                            ResizeEdge::None => {
+                                // If the mouse is inside this window's body, we should stop checking background windows
+                                let wx = (window.canvas_x - self.viewport_x) as i32;
+                                let wy = (window.canvas_y - self.viewport_y) as i32;
+                                let ww = window.base_width as i32;
+                                let wh = window.base_height as i32;
+                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
+                                    break;
+                                }
+                            },
+                            ResizeEdge::Top         => { new_icon = CursorImageStatus::Named(CursorIcon::NResize);  break; }
+                            ResizeEdge::Bottom      => { new_icon = CursorImageStatus::Named(CursorIcon::SResize);  break; }
+                            ResizeEdge::Left        => { new_icon = CursorImageStatus::Named(CursorIcon::WResize);  break; }
+                            ResizeEdge::TopLeft     => { new_icon = CursorImageStatus::Named(CursorIcon::NwResize); break; }
+                            ResizeEdge::BottomLeft  => { new_icon = CursorImageStatus::Named(CursorIcon::SwResize); break; }
+                            ResizeEdge::Right       => { new_icon = CursorImageStatus::Named(CursorIcon::EResize);  break; }
+                            ResizeEdge::TopRight    => { new_icon = CursorImageStatus::Named(CursorIcon::NeResize); break; }
+                            ResizeEdge::BottomRight => { new_icon = CursorImageStatus::Named(CursorIcon::SeResize); break; }
+                            _ => {}
+                        }
+                    }
+                    self.cursor_icon = new_icon;
+                }
+                if let Some((wl_surf, _)) = under {    
                     if let Some(window) = self.windows.iter().find(|cw| {
-                            cw.window
-                                .toplevel()
-                                .map_or(false, |t| t.wl_surface() == &wl_surf)
-                        }) {
+                        cw.window   
+                            .toplevel()
+                            .map_or(false, |t| t.wl_surface() == &wl_surf)
+                    }) {
                         let window_id = window.id;
-
-                        let wx = (window.canvas_x - self.viewport_x) as i32;
-                        let wy = (window.canvas_y - self.viewport_y) as i32;
-                        let ww = window.base_width as i32;
-                        let wh = window.base_height as i32;
-                        let px = pointer.current_location().x as i32;
-                        let py = pointer.current_location().y as i32;
-
-                        if px > wx + ww - 8 && py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SeResize); }
-                        else if px > wx + ww - 8 && py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NeResize); }
-                        else if px < wx + 8 && py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NwResize); }
-                        else if px < wx + 8 && py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SwResize); }
-                        else if px > wx + ww - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::EResize); }
-                        else if px < wx + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::WResize); }
-                        else if py > wy + wh - 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::SResize); }
-                        else if py < wy + 8 { self.cursor_icon = CursorImageStatus::Named(CursorIcon::NResize); }
-                        else { self.cursor_icon = CursorImageStatus::default_named(); }
-
                         if self.config.hover_to_focus {
                             keyboard.set_focus(self, Some(wl_surf.clone()), serial);
                             self.focused_window_id = Some(window_id);
                         }
                     }
-                    
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -302,55 +346,57 @@ impl Treewm {
                 } else if ButtonState::Pressed == button_state && !pointer.is_grabbed()
                     && button == BTN_LEFT
                 {
-                    let win_positions = self
-                        .windows
-                        .iter()
-                        .find(|cw|{
-                            let wx = (cw.canvas_x - self.viewport_x) as i32;
-                            let wy = (cw.canvas_y - self.viewport_y) as i32;
-                            let ww = cw.base_width as i32;
-                            let wh = cw.base_height as i32;
-                            let px = pointer.current_location().x as i32;
-                            let py = pointer.current_location().y as i32;
-
-                            !((wx..(wx+ww)).contains(&px) && (wy..(wy+wh)).contains(&py)) && ((wx-8..(wx+ww+8)).contains(&px) && (wy-8..wy+wh+8).contains(&py))
-                    });
-                    let mut edge: ResizeEdge = ResizeEdge::None;
-                    if let Some(cw) = win_positions {
-                        let wx = (cw.canvas_x - self.viewport_x) as i32;
-                        let wy = (cw.canvas_y - self.viewport_y) as i32;
-                        let ww = cw.base_width as i32;
-                        let wh = cw.base_height as i32;
-                        let px = pointer.current_location().x as i32;
-                        let py = pointer.current_location().y as i32;
-
-                        if px > wx + ww - 8 && py > wy + wh - 8 { edge = ResizeEdge::BottomRight; }
-                        else if px > wx + ww - 8 && py < wy + 8 { edge = ResizeEdge::TopRight; }
-                        else if px < wx + 8 && py < wy + 8 { edge = ResizeEdge::TopLeft; }
-                        else if px < wx + 8 && py > wy + wh - 8 { edge = ResizeEdge::BottomLeft; }
-                        else if px > wx + ww - 8 { edge = ResizeEdge::Right; }
-                        else if px < wx + 8 { edge = ResizeEdge::Left; }
-                        else if py > wy + wh - 8 { edge = ResizeEdge::Bottom; }
-                        else if py < wy + 8 { edge = ResizeEdge::Top; }
-
-                        let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
-
-                        let grab = ResizeSurfaceGrab {
-                            start_data: PointerGrabStartData {
-                                focus: None,
-                                button: BTN_LEFT,
-                                location: pointer.current_location(),
+                    let px = pointer.current_location().x as i32;
+                    let py = pointer.current_location().y as i32;
+                    let found = self.windows.iter().rev().find_map(|cw| {
+                        match window_edge_at(cw, px, py, self.viewport_x, self.viewport_y, self.zoom) {
+                            ResizeEdge::None => {
+                                let wx = (cw.canvas_x - self.viewport_x) as i32;
+                                let wy = (cw.canvas_y - self.viewport_y) as i32;
+                                let ww = cw.base_width as i32;
+                                let wh = cw.base_height as i32;
+                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
+                                    // Hack to stop find_map: return a special marker? No, find_map only stops on Some.
+                                    // If we are inside the window body, we shouldn't resize.
+                                    // Wait, if we return Some with a fake value, we can handle it outside.
+                                    // Let's just return Some((cw.id, ResizeEdge::None))
+                                    Some((cw.id, ResizeEdge::None))
+                                } else {
+                                    None
+                                }
                             },
-                            window_surface: surface,
-                            initial_width: ww,
-                            initial_height: wh,
-                            initial_canvas_x: cw.canvas_x,
-                            initial_canvas_y: cw.canvas_y,
-                            grabbed_edge: edge, 
-                        };
-                        pointer.set_grab(self, grab, serial, Focus::Clear);
-                    }
-                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
+                            edge => Some((cw.id, edge)),
+                        }
+                    });
+                    if let Some((cw_id, edge)) = found {
+                        if edge != ResizeEdge::None {
+                            let cw = self.windows.iter_mut().find(|w| w.id == cw_id).unwrap();
+                            let surface = cw.window.toplevel().expect("Window doesnt have a top level").wl_surface().clone();
+
+                            cw.resize_edge = edge;
+                            cw.resize_initial_x = cw.canvas_x;
+                            cw.resize_initial_y = cw.canvas_y;
+                            cw.resize_initial_w = cw.base_width;
+                            cw.resize_initial_h = cw.base_height;
+
+                            let initial_width = cw.base_width;
+                            let initial_height = cw.base_height;
+
+                            let grab = ResizeSurfaceGrab {
+                                start_data: PointerGrabStartData {
+                                    focus: None,
+                                    button: BTN_LEFT,
+                                    location: pointer.current_location(),
+                                },
+                                window_surface: surface,
+                                initial_width,
+                                initial_height,
+                                grabbed_edge: edge,
+                                last_update: std::time::Instant::now(),
+                            };
+                            pointer.set_grab(self, grab, serial, Focus::Clear);
+                        }
+                    }                } else if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
                     if let Some((window, _loc)) = self
                         .space
                         .element_under(pointer.current_location())
@@ -393,6 +439,7 @@ impl Treewm {
                         }
                     }
                 }
+
 
                 pointer.button(
                     self,

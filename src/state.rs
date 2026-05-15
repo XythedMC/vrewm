@@ -2,7 +2,7 @@ use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant, process
 
 use smithay::{
     backend::allocator::dmabuf::Dmabuf,
-    desktop::{LayerSurface, PopupKind, PopupManager, Space, Window, WindowSurfaceType},
+    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
@@ -49,6 +49,13 @@ pub struct CanvasWindow {
     /// Current animated position (lerped each frame toward target).
     pub canvas_x: f64,
     pub canvas_y: f64,
+
+    pub resize_edge: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
+    pub resize_initial_x: f64,
+    pub resize_initial_y: f64,
+    pub resize_initial_w: i32,
+    pub resize_initial_h: i32,
+    
     /// Destination position set by layout functions.
     pub target_x: f64,
     pub target_y: f64,
@@ -94,6 +101,8 @@ pub struct Treewm {
     pub zoom_returning: bool,
     pub zoom_animating: bool,
 
+    pub scale: f64,
+
     pub(crate) viewport_anim_start_x: f64,
     pub(crate) viewport_anim_start_y: f64,
     /// When Some, a 300 ms cubic ease-out animation is in progress.
@@ -111,6 +120,8 @@ pub struct Treewm {
     pub cursor_position: Point<f64, Logical>,
     pub layer_surfaces: Vec<LayerSurface>,
     pub background_type: BackgroundType,
+    
+    pub tiling_visible_ids: Vec<u32>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -174,6 +185,7 @@ impl Treewm {
         };
         let cursor_icon = CursorImageStatus::default_named();
         let layer_surfaces = Vec::new();
+        let visible_ids: Vec<u32> = Vec::new();
 
         let background_type = match config.background_type.as_str() {
             "color" => BackgroundType::Color,
@@ -198,6 +210,7 @@ impl Treewm {
             zoom_target: 1.0,
             zoom_returning: false,
             zoom_animating: false,
+            scale: 1.0,
             anim_start: None,
             next_window_id: 0,
             focused_window_id: None,
@@ -210,6 +223,7 @@ impl Treewm {
             cursor_position: Point::new(0.0, 0.0),
             layer_surfaces,
             background_type,
+            tiling_visible_ids: visible_ids,
             socket_name,
             compositor_state,
             xdg_shell_state,
@@ -394,6 +408,7 @@ impl Treewm {
 
         let mut slots = HashMap::new();
         self.layout_node_bsp(tiling_root, (0.0, 0.0, w, h), &mut slots);
+        self.tiling_visible_ids = slots.keys().copied().collect();
 
         self.viewport_target_x = 0.0;
         self.viewport_target_y = 0.0;
@@ -683,7 +698,12 @@ impl Treewm {
             self.zoom_returning = true;
             self.anim_start = Some(Instant::now());
         }
-        else if self.zoom_returning == true && t >= 1.0 { self.zoom_animating = false; }
+        else if self.zoom_returning == true && t >= 1.0 { 
+            self.zoom_animating = false;
+            self.anim_start = None;
+        } else if t >= 1.0 {
+            self.anim_start = None;
+        }
 
         self.sync_window_positions();
     }

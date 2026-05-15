@@ -20,10 +20,8 @@ pub struct ResizeSurfaceGrab {
     pub initial_width: i32,
     pub initial_height: i32,
 
-    pub initial_canvas_x: f64,
-    pub initial_canvas_y: f64,
-
     pub grabbed_edge: ResizeEdge,
+    pub last_update: std::time::Instant,
 }
 
 impl PointerGrab<Treewm> for ResizeSurfaceGrab {
@@ -37,44 +35,71 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
         handle.motion(data, None, event);
         
         let delta = event.location - self.start_data.location;
+
         let mut new_width = self.initial_width;
         let mut new_height = self.initial_height;
-        let mut canvas_x = self.initial_canvas_x;
-        let mut canvas_y = self.initial_canvas_y;
 
         match self.grabbed_edge {
-            ResizeEdge::Bottom => new_height = (new_height + delta.y as i32).max(128),
-            ResizeEdge::Left => (new_width, canvas_x) = ((new_width - delta.x as i32).max(128), self.initial_canvas_x + delta.x),
-            ResizeEdge::Top => (new_height, canvas_y) = ((new_height - delta.y as i32).max(128), self.initial_canvas_y + delta.y),
-            ResizeEdge::Right => new_width = (new_width + delta.x as i32).max(128),
-            ResizeEdge::TopLeft => (new_width, new_height, canvas_x, canvas_y) = ((new_width - delta.x as i32).max(128), (new_height - delta.y as i32).max(128), self.initial_canvas_x + delta.x, self.initial_canvas_y + delta.y),
-            ResizeEdge::BottomLeft => (new_width, new_height, canvas_x) = ((new_width - delta.x as i32).max(128), (new_height + delta.y as i32).max(128), self.initial_canvas_x + delta.x),
-            ResizeEdge::TopRight => (new_width, new_height, canvas_y) = ((new_width + delta.x as i32).max(128), (new_height - delta.y as i32).max(128), self.initial_canvas_y + delta.y),
-            ResizeEdge::BottomRight => (new_width, new_height) = ((new_width + delta.x as i32).max(128), (new_height + delta.y as i32).max(128)),
-            ResizeEdge::None => {},
+            ResizeEdge::Bottom => {
+                new_height = (self.initial_height + delta.y as i32).max(128);
+            }
+            ResizeEdge::Top => {
+                new_height = (self.initial_height - delta.y as i32).max(128);
+            }
+            ResizeEdge::Right => {
+                new_width = (self.initial_width + delta.x as i32).max(128);
+            }
+            ResizeEdge::Left => {
+                new_width = (self.initial_width - delta.x as i32).max(128);
+            }
+            ResizeEdge::BottomRight => {
+                new_width = (self.initial_width + delta.x as i32).max(128);
+                new_height = (self.initial_height + delta.y as i32).max(128);
+            }
+            ResizeEdge::BottomLeft => {
+                new_width = (self.initial_width - delta.x as i32).max(128);
+                new_height = (self.initial_height + delta.y as i32).max(128);
+            }
+            ResizeEdge::TopRight => {
+                new_width = (self.initial_width + delta.x as i32).max(128);
+                new_height = (self.initial_height - delta.y as i32).max(128);
+            }
+            ResizeEdge::TopLeft => {
+                new_width = (self.initial_width - delta.x as i32).max(128);
+                new_height = (self.initial_height - delta.y as i32).max(128);
+            }
             _ => {},
         };
+
+        let now = std::time::Instant::now();
+        let should_update = now.duration_since(self.last_update).as_millis() >= 16;
 
         for cw in data.windows.iter_mut() {
             if cw.window
                 .toplevel()
                 .map_or(false, |t| t.wl_surface() == &self.window_surface)
             {
-                cw.base_height = new_height;
-                cw.base_width = new_width;
-                cw.tree_width = new_width;
-                cw.tree_height = new_height;
-                cw.canvas_x = canvas_x;
-                cw.target_x = canvas_x;
-                cw.canvas_y = canvas_y;
-                cw.target_y = canvas_y;
-                if let Some(tl) = cw.window.toplevel() {
-                    tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
-                    tl.send_pending_configure();
+                if cw.tree_width != new_width || cw.tree_height != new_height {
+                    cw.base_height = new_height;
+                    cw.base_width = new_width;
+                    cw.tree_width = new_width;
+                    cw.tree_height = new_height;
+                    
+                    if should_update {
+                        if let Some(tl) = cw.window.toplevel() {
+                            tl.with_pending_state(|s| { s.size = Some((new_width, new_height).into()); });
+                            tl.send_pending_configure();
+                        }
+                    }
                 }
             }
         }
-        data.sync_window_positions();
+        
+        if should_update {
+            self.last_update = now;
+        }
+
+        let _ = data.display_handle.flush_clients();
 
     }
     fn relative_motion(
@@ -186,7 +211,16 @@ impl PointerGrab<Treewm> for ResizeSurfaceGrab {
         handle.gesture_hold_end(data, event);
     }
 
-    fn unset(&mut self, _data: &mut Treewm) { }
+    fn unset(&mut self, data: &mut Treewm) {
+        for cw in data.windows.iter_mut() {
+            if cw.window
+                .toplevel()
+                .map_or(false, |t| t.wl_surface() == &self.window_surface)
+            {
+                cw.resize_edge = smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge::None;
+            }
+        }
+    }
     
     fn start_data(&self) -> &PointerGrabStartData<Treewm> {
         &self.start_data

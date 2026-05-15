@@ -3,15 +3,14 @@ use std::time::Duration;
 use smithay::{
     backend::{
         renderer::{
-            ImportDma, ImportEgl, damage::OutputDamageTracker, element::{Kind, surface::WaylandSurfaceRenderElement}, gles::{
-                GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement,
+            ImportDma, ImportEgl, damage::OutputDamageTracker, element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement}, gles::{
+                GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
-        },
-        winit::{self, WinitEvent},
-    }, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Rectangle, Transform}
+        }, winit::{self, WinitEvent}
+    }, desktop::Window, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Logical, Rectangle, Scale, Transform}
 };
 
-use crate::{Treewm, state::{BackgroundType, ViewMode}};
+use crate::{Treewm, state::{BackgroundType, CanvasWindow, ViewMode}};
 
 smithay::backend::renderer::element::render_elements! {
     TreewmElement <=GlesRenderer>;
@@ -185,41 +184,39 @@ fn connector_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShade
         .collect()
 }
 
-fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram) -> Vec<PixelShaderElement> {
+fn focus_border_elements(state: &Treewm, prog: &GlesPixelProgram, cw: &CanvasWindow, geo: Rectangle<i32, Logical>) -> PixelShaderElement {
     let fid = state.focused_window_id;
-    state.windows.iter().map(|cw| {
-        let sx = (cw.canvas_x - state.viewport_x) as i32;
-        let sy = (cw.canvas_y - state.viewport_y) as i32;
-        let ww = cw.base_width;
-        let wh = cw.base_height;
-        let t = state.config.border_width;
-        let mut color = [0.0, 0.0, 0.0, 1.0];
+    let sx = ((geo.loc.x as f64 - state.config.border_width as f64) / state.zoom) as i32;
+    let sy = ((geo.loc.y as f64 - state.config.border_width as f64) / state.zoom) as i32;
+    let wh = ((geo.size.h + (state.config.border_width as i32 * 2)) as f64) as i32;
+    let ww = ((geo.size.w + (state.config.border_width as i32 * 2)) as f64) as i32;
+    let t = state.config.border_width;
+    let mut color = [0.0, 0.0, 0.0, 1.0];
 
-        if Some(cw.id) == fid {
-            let [r, g, b] = state.config.focused_border_color;
-            color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
-        }
-        else {
-            let [r, g, b] = state.config.unfocused_border_color;
-            color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
-        }
-        
-        let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
+    if Some(cw.id) == fid {
+        let [r, g, b] = state.config.focused_border_color;
+        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+    }
+    else {
+        let [r, g, b] = state.config.unfocused_border_color;
+        color = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0];
+    }
+    
+    let area = Rectangle { loc: (sx, sy).into(), size: (ww, wh).into() };
 
-        PixelShaderElement::new(
-            prog.clone(),
-            area,
-            None, // Damage = None means Smithay handles it or we force full redraw
-            1.0,
-            vec![
-                Uniform::new("u_color", color),
-                Uniform::new("elem_size", (ww as f32, wh as f32)),
-                Uniform::new("radius", state.config.corner_rounding),
-                Uniform::new("thickness", t as f32)
-            ],
-            Kind::Unspecified,
-        )
-    }).collect()
+    PixelShaderElement::new(
+        prog.clone(),
+        area,
+        None, // Damage = None means Smithay handles it or we force full redraw
+        1.0,
+        vec![
+            Uniform::new("u_color", color),
+            Uniform::new("elem_size", (ww as f32 * state.zoom as f32, wh as f32 * state.zoom as f32)),
+            Uniform::new("radius", state.config.corner_rounding),
+            Uniform::new("thickness", t as f32)
+        ],
+        Kind::Unspecified,
+    )
 }
 
 fn indicator_element(state: &Treewm, prog: &GlesPixelProgram) -> PixelShaderElement {
@@ -264,6 +261,7 @@ pub fn init_winit(
             serial_number: "Unknown".into(),
         },
     );
+    state.scale = output.current_scale().fractional_scale();
     let _global = output.create_global::<Treewm>(&state.display_handle);
     output.change_current_state(
         Some(mode),
@@ -337,51 +335,80 @@ pub fn init_winit(
 
                     let size   = backend.window_size();
                     let damage = Rectangle::from_size(size);
-
                     {
                         let (renderer, mut framebuffer) = match backend.bind() {
                             Ok(v)  => v,
                             Err(e) => { eprintln!("treewm: bind error: {e}"); return; }
                         };
 
+                        let background_color = state.config.background_color;
+                        let color = background_color.map(|x| x as f32 / 255.0);
                         // Assemble overlay elements for this frame.
                         let mut overlays: Vec<TreewmElement> = Vec::new();
-
-                        if state.view_mode == ViewMode::TreeView {
-                            if let Some(prog) = &line_prog {
-                                overlays.extend(connector_elements(state, prog).into_iter().map(TreewmElement::Shader));
+                        let (focused, unfocused): (Vec<&CanvasWindow>, Vec<&CanvasWindow>) = state.windows.iter().partition(|cw| Some(cw.id) == state.focused_window_id );
+                        for focused_window in focused {
+                            if state.view_mode == ViewMode::Tiling && !state.tiling_visible_ids.contains(&focused_window.id) {continue;}
+                        
+                            if let Some(geo) = state.space.element_geometry(&focused_window.window) {
+                                if let Some(prog) = &border_prog {
+                                    overlays.push(TreewmElement::Shader(focus_border_elements(state, prog, focused_window, geo)));
+                                }
+                                overlays.extend(
+                                    focused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                                        renderer,
+                                        geo.loc.to_physical_precise_round(state.scale),
+                                        Scale::from(state.scale),
+                                        1.0,
+                                    ).into_iter().map(TreewmElement::Surface)
+                                );
                             }
                         }
-                        if let Some(prog) = &solid_prog {
-                            overlays.push(TreewmElement::Shader(indicator_element(state, prog)));
-                        }
-                        if let Some(prog) = &border_prog {
-                            overlays.extend(focus_border_elements(state, prog).into_iter().map(TreewmElement::Shader));
+                        for unfocused_window in unfocused {
+                            if state.view_mode == ViewMode::Tiling && !state.tiling_visible_ids.contains(&unfocused_window.id) {continue;}
+                            if let Some(geo) = state.space.element_geometry(&unfocused_window.window) {
+                                if let Some(prog) = &border_prog {
+                                    overlays.push(TreewmElement::Shader(focus_border_elements(state, prog, unfocused_window, geo)));
+                                }
+                                overlays.extend(
+                                    unfocused_window.window.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
+                                        renderer,
+                                        geo.loc.to_physical_precise_round(state.scale),
+                                        Scale::from(state.scale),
+                                        1.0,
+                                    ).into_iter().map(TreewmElement::Surface)
+                                );
+                            }
                         }
 
                         // Render layer surfaces (wlr-layer-shell: background/bottom/top/overlay).
                         {
-                            use smithay::backend::renderer::element::AsRenderElements;
-                            let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
                             let layer_map = smithay::desktop::layer_map_for_output(&output);
                             for layer in layer_map.layers() {
                                 let loc = layer_map.layer_geometry(layer).unwrap_or_default().loc;
                                 overlays.extend(
                                     layer.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(
                                         renderer,
-                                        loc.to_physical_precise_round(scale),
-                                        scale,
+                                        loc.to_physical_precise_round(state.scale),
+                                        Scale::from(state.scale),
                                         1.0,
                                     ).into_iter().map(TreewmElement::Surface)
                                 );
                             }
                         }
-                        let background_color = state.config.background_color;
-                        let color = background_color.map(|x| x as f32 / 255.0);
+
+                        if let Some(prog) = &solid_prog {
+                            overlays.push(TreewmElement::Shader(indicator_element(state, prog)));
+                        }
+                        if state.view_mode == ViewMode::TreeView {
+                            if let Some(prog) = &line_prog {
+                                overlays.extend(connector_elements(state, prog).into_iter().map(TreewmElement::Shader));
+                            }
+                        }
+
                         if let Err(e) = smithay::desktop::space::render_output::<
                             _,
                             TreewmElement,
-                            _,
+                            Window,
                             _,
                         >(
                             &output,
@@ -389,7 +416,7 @@ pub fn init_winit(
                             &mut framebuffer,
                             1.0,
                             0,
-                            [&state.space],
+                            [],
                             &overlays,
                             &mut damage_tracker,
                             if state.background_type != BackgroundType::Color { [0.1, 0.1, 0.1, 1.0] } else { [color[0], color[1], color[2], 1.0] },
