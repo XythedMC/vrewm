@@ -7,7 +7,7 @@ use smithay::{
                 GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
         }, winit::{self, WinitEvent}
-    }, desktop::Window, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Logical, Rectangle, Scale, Transform}
+    }, desktop::{Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Logical, Rectangle, Scale, Transform}
 };
 
 use crate::{Treewm, state::{BackgroundType, CanvasWindow, ViewMode}};
@@ -442,7 +442,7 @@ pub fn init_winit(
 
                     // Send frames to layer surfaces and refresh the layer map.
                     {
-                        let layer_map = smithay::desktop::layer_map_for_output(&output);
+                        let layer_map = layer_map_for_output(&output);
                         for layer in layer_map.layers() {
                             layer.send_frame(
                                 &output,
@@ -454,7 +454,7 @@ pub fn init_winit(
                     }
 
                     state.space.refresh();
-                    smithay::desktop::layer_map_for_output(&output).cleanup();
+                    layer_map_for_output(&output).cleanup();
                     state.popups.cleanup();
                     let _ = state.display_handle.flush_clients();
 

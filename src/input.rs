@@ -1,11 +1,11 @@
 use smithay::{
-    backend::input::{
+    backend::{input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
-    },
+    }, session::Session},
     input::{
         keyboard::{FilterResult, Keysym},
-        pointer::{AxisFrame, ButtonEvent, Focus, GrabStartData as PointerGrabStartData, MotionEvent, CursorIcon, CursorImageStatus},
+        pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData as PointerGrabStartData, MotionEvent},
     },
     reexports::{wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge, wayland_server::protocol::wl_surface::WlSurface},
     utils::SERIAL_COUNTER,
@@ -14,7 +14,7 @@ use smithay::{
 use crate::{Treewm, grabs::{PanCanvasGrab, ResizeSurfaceGrab}, state::{CanvasWindow, ModifierKey, ViewMode}};
 
 impl Treewm {
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {   
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) { 
         fn window_edge_at(
             cw: &CanvasWindow,
             px: i32, py: i32,
@@ -126,6 +126,25 @@ impl Treewm {
                         // ── Gentle loop stopping ────────────────────
                         if main_mod && modifiers.alt && sym == Keysym::BackSpace {
                             data.loop_signal.stop();
+                            return FilterResult::Intercept(());
+                        }
+
+                        if modifiers.ctrl && modifiers.alt {
+                            match sym {
+                                Keysym::XF86_Switch_VT_1 => data.session.as_mut().unwrap().change_vt(1).unwrap(),
+                                Keysym::XF86_Switch_VT_2 => data.session.as_mut().unwrap().change_vt(2).unwrap(),
+                                Keysym::XF86_Switch_VT_3 => data.session.as_mut().unwrap().change_vt(3).unwrap(),
+                                Keysym::XF86_Switch_VT_4 => data.session.as_mut().unwrap().change_vt(4).unwrap(),
+                                Keysym::XF86_Switch_VT_5 => data.session.as_mut().unwrap().change_vt(5).unwrap(),
+                                Keysym::XF86_Switch_VT_6 => data.session.as_mut().unwrap().change_vt(6).unwrap(),
+                                Keysym::XF86_Switch_VT_7 => data.session.as_mut().unwrap().change_vt(7).unwrap(),
+                                Keysym::XF86_Switch_VT_8 => data.session.as_mut().unwrap().change_vt(8).unwrap(),
+                                Keysym::XF86_Switch_VT_9 => data.session.as_mut().unwrap().change_vt(9).unwrap(),
+                                Keysym::XF86_Switch_VT_10 => data.session.as_mut().unwrap().change_vt(10).unwrap(),
+                                Keysym::XF86_Switch_VT_11 => data.session.as_mut().unwrap().change_vt(11).unwrap(),
+                                Keysym::XF86_Switch_VT_12 => data.session.as_mut().unwrap().change_vt(12).unwrap(),
+                                _ => {}
+                            };
                             return FilterResult::Intercept(());
                         }
 

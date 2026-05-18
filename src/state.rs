@@ -1,16 +1,15 @@
-use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Instant, process::Command};
+use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::allocator::dmabuf::Dmabuf,
-    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType},
+    backend::{allocator::{dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, element::surface::WaylandSurfaceRenderElement, gles::GlesRenderer}, session::libseat::LibSeatSession, udev::UdevEvent},
+    desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output, space::SpaceRenderElements},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
-        wayland_server::{
+        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, RegistrationToken, generic::Generic}, drm::control::crtc::Handle, gbm::Device, wayland_server::{
             Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
-        },
+        }
     },
-    utils::{Logical, Point, SERIAL_COUNTER},
+    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER},
     wayland::{
         compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
@@ -40,6 +39,23 @@ pub enum BackgroundType {
     Color,
     Image,
     Shader,
+}
+
+pub type GbmDrmCompositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
+
+pub struct GpuData {
+    pub fd: DeviceFd,
+    pub drm: DrmDevice,
+    pub gbm: GbmDevice<DrmDeviceFd>,
+    pub renderer: GlesRenderer,
+    pub compositors: HashMap<Handle, GbmDrmCompositor>,
+}
+
+pub struct BackendData {
+    pub session: LibSeatSession,
+    pub gpus: HashMap<u64, GpuData>,
+    pub libinput: RegistrationToken,
+    pub udev_token: RegistrationToken,
 }
 
 /// A window with its position on the infinite canvas and its place in the window tree.
@@ -85,6 +101,10 @@ pub struct Treewm {
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
+
+    pub session: Option<LibSeatSession>,
+    pub gpu: HashMap<u64, GpuData>,
+    pub backend: Option<BackendData>,
 
     pub space: Space<Window>,
     pub windows: Vec<CanvasWindow>,
@@ -197,6 +217,9 @@ impl Treewm {
         Self {
             start_time,
             display_handle: dh,
+            session: None,
+            gpu: HashMap::new(),
+            backend: None,
             space,
             windows: Vec::new(),
             loop_signal,
@@ -251,7 +274,10 @@ impl Treewm {
         display: Display<Treewm>,
         event_loop: &mut EventLoop<Self>,
     ) -> OsString {
-        let listening_socket = ListeningSocketSource::with_name("wayland-treewm").expect("Couldn't initialize wayland socket because all sockets were already taken");
+        println!("XDG_RUNTIME_DIR = {:?}", std::env::var("XDG_RUNTIME_DIR"));
+        let listening_socket = ListeningSocketSource::with_name("wayland-treewm")
+                .map_err(|e| { eprintln!("Socket error: {}", e); e })
+                .expect("...");
         let loop_handle = event_loop.handle();
 
         loop_handle
@@ -603,6 +629,57 @@ impl Treewm {
             let cw = widths.get(&child_id).copied().unwrap_or(win_w);
             self.collect_positions(child_id, child_x, y + level_h, level_h, gap, win_w, widths, out);
             child_x += cw + gap;
+        }
+    }
+
+    // -- DRM ---------------------------------------
+    pub fn process_drm_event(&mut self, device_id: u64, event: DrmEvent) {
+        match event {
+            DrmEvent::VBlank(handle) => {
+                self.tick_animation();
+
+                let color = self.config.background_color;
+                let clear_color = color.map(|x| x as f32 / 255.0);
+                let gpu_data = self.gpu.get_mut(&device_id).unwrap();
+                let renderer = &mut gpu_data.renderer;
+                let Some(compositor) = gpu_data.compositors.get_mut(&handle) else {
+                    return; 
+                };
+                let elements: &[SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>] = &[];
+
+                compositor.reset_buffers();
+                compositor.render_frame(renderer, elements, Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]), FrameFlags::empty()).expect("Failed to render frame");
+
+                compositor.queue_frame(()).expect("Failed to queue frame");
+
+                self.space.elements().for_each(|window| {
+                    window.send_frame(
+                        &self.space.outputs().next().unwrap(),
+                        self.start_time.elapsed(),
+                        Some(Duration::ZERO),
+                        |_, _| Some(self.space.outputs().next().unwrap().clone()),
+                    )
+                });
+
+                // Send frames to layer surfaces and refresh the layer map.
+                {
+                    let layer_map = layer_map_for_output(&self.space.outputs().next().unwrap());
+                    for layer in layer_map.layers() {
+                        layer.send_frame(
+                            &self.space.outputs().next().unwrap(),
+                            self.start_time.elapsed(),
+                            Some(Duration::ZERO),
+                            |_, _| Some(self.space.outputs().next().unwrap().clone()),
+                        );
+                    }
+                }
+
+                self.space.refresh();
+                layer_map_for_output(&self.space.outputs().next().unwrap()).cleanup();
+                self.popups.cleanup();
+                let _ = self.display_handle.flush_clients();
+            },
+            DrmEvent::Error(error) => eprintln!("DRM error: {:?}", error),
         }
     }
     

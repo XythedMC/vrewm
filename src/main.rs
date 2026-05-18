@@ -4,6 +4,7 @@ mod input;
 mod ipc;
 mod state;
 mod winit;
+mod drm;
 
 pub use state::Treewm;
 
@@ -62,7 +63,11 @@ fn main() -> anyhow::Result<()>{
         }
     }).unwrap();
 
-    winit::init_winit(&mut event_loop, &mut state).expect("Failed to initialize winit backend");
+    if std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok() {
+        winit::init_winit(&mut event_loop, &mut state).expect("Failed to initialize winit backend");
+    } else {
+        drm::init_drm(&mut event_loop, &mut state).expect("Failed to initialize DRM backend");
+    }
 
     let socket_str = state.socket_name.to_string_lossy().into_owned();
 
