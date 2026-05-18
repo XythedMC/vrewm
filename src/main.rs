@@ -5,7 +5,7 @@ mod ipc;
 mod state;
 mod winit;
 mod drm;
-
+mod renderering;
 pub use state::Treewm;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};

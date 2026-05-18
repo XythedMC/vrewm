@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use anyhow::{Error, anyhow};
 use std::{fs::{create_dir_all, read_to_string, write}};
 use dirs::config_dir;
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TreeWMConfig {
     pub main_modifier: String,
     pub gap: f64,
@@ -42,7 +42,7 @@ pub fn create_config() -> anyhow::Result<()>{
     let values = TreeWMConfig { 
         main_modifier: String::from("Ctrl"),
         gap: 80.0, 
-        focused_border_color: [255, 255, 255],
+        focused_border_color: [64, 144, 194],
         unfocused_border_color: [0, 0, 0],
         background_type: String::from("color"),
         background_color: [26, 26, 26],

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::{allocator::{dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, element::surface::WaylandSurfaceRenderElement, gles::GlesRenderer}, session::libseat::LibSeatSession, udev::UdevEvent},
+    backend::{allocator::{dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, element::surface::WaylandSurfaceRenderElement, gles::{GlesPixelProgram, GlesRenderer, element::PixelShaderElement}}, session::libseat::LibSeatSession, udev::UdevEvent},
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output, space::SpaceRenderElements},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
@@ -18,7 +18,13 @@ use smithay::{
     },
 };
 
-use crate::handlers::config::TreeWMConfig;
+use crate::{handlers::config::TreeWMConfig, renderering::build_render_elements};
+
+smithay::backend::renderer::element::render_elements! {
+    pub TreewmElement <=GlesRenderer>;
+    Shader = PixelShaderElement,
+    Surface = WaylandSurfaceRenderElement<GlesRenderer>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -49,6 +55,10 @@ pub struct GpuData {
     pub gbm: GbmDevice<DrmDeviceFd>,
     pub renderer: GlesRenderer,
     pub compositors: HashMap<Handle, GbmDrmCompositor>,
+
+    pub line_prog: Option<GlesPixelProgram>,
+    pub solid_prog: Option<GlesPixelProgram>,
+    pub border_prog: Option<GlesPixelProgram>,
 }
 
 pub struct BackendData {
@@ -634,23 +644,51 @@ impl Treewm {
 
     // -- DRM ---------------------------------------
     pub fn process_drm_event(&mut self, device_id: u64, event: DrmEvent) {
+        eprintln!("process_drm_event called");
         match event {
             DrmEvent::VBlank(handle) => {
+                eprintln!("VBlank fired");
                 self.tick_animation();
 
                 let color = self.config.background_color;
                 let clear_color = color.map(|x| x as f32 / 255.0);
+
                 let gpu_data = self.gpu.get_mut(&device_id).unwrap();
+                let Some(compositor) = gpu_data.compositors.get_mut(&handle) else { return; };
+
+                compositor.frame_submitted().ok();
+
                 let renderer = &mut gpu_data.renderer;
-                let Some(compositor) = gpu_data.compositors.get_mut(&handle) else {
-                    return; 
-                };
-                let elements: &[SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>] = &[];
 
-                compositor.reset_buffers();
-                compositor.render_frame(renderer, elements, Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]), FrameFlags::empty()).expect("Failed to render frame");
+                let elements = build_render_elements(
+                    &self.windows,
+                    &self.space,
+                    self.focused_window_id,
+                    self.view_mode,
+                    &self.tiling_visible_ids,
+                    self.scale,
+                    self.zoom,
+                    self.viewport_x,
+                    self.viewport_y,
+                    &self.config, 
+                    renderer, 
+                    &gpu_data.line_prog, 
+                    &gpu_data.solid_prog, 
+                    &gpu_data.border_prog
+                );
 
-                compositor.queue_frame(()).expect("Failed to queue frame");
+                let render_frame_result = compositor.render_frame(
+                    renderer, 
+                    &elements, 
+                    Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]), 
+                    FrameFlags::empty()
+                ).expect("Failed to render frame");
+
+                if !render_frame_result.is_empty {
+                    if let Err(e) = compositor.queue_frame(()) {
+                        eprintln!("queue_frame error for crtc {:?}: {:?}", handle, e);
+                    }
+                }
 
                 self.space.elements().for_each(|window| {
                     window.send_frame(

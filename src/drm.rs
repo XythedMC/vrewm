@@ -20,7 +20,7 @@ use smithay::{
     utils::Size,
 };
 use rustix::fs::OFlags;
-use crate::{Treewm, state::{GbmDrmCompositor, GpuData}};
+use crate::{Treewm, renderering, state::{GbmDrmCompositor, GpuData}};
 
 fn open_gpu(
     device_id: u64,
@@ -47,6 +47,11 @@ fn open_gpu(
     let egl_display = unsafe { EGLDisplay::new(gbm.clone()).expect("Failed to create EGL display") };
     let egl_ctx = EGLContext::new(&egl_display).expect("Failed to create EGL context");
     let mut renderer = unsafe { GlesRenderer::new(egl_ctx).expect("Failed to create GLES renderer") };
+
+    let line_prog = renderering::compile_line(&mut renderer);
+    let solid_prog = renderering::compile_solid(&mut renderer);
+    let border_prog = renderering::compile_border(&mut renderer);
+
 
     let resources = drm.resource_handles().expect("Failed to get DRM resources");
     let mut compositors: HashMap<Handle, GbmDrmCompositor> = HashMap::new();
@@ -112,6 +117,7 @@ fn open_gpu(
 
             eprintln!("GPU ready, first frame queued for crtc {:?}", crtc);
             compositors.insert(crtc, compositor);
+            break; // one compositor per connector
         }
     }
 
@@ -121,6 +127,9 @@ fn open_gpu(
         gbm,
         renderer,
         compositors,
+        line_prog,
+        solid_prog,
+        border_prog,
     });
 }
 
