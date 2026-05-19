@@ -1,12 +1,13 @@
 use smithay::{
     backend::{
         renderer::{
-            ImportDma, ImportEgl, damage::OutputDamageTracker, element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement}, gles::{
-                GlesPixelProgram, GlesRenderer, Uniform, UniformName, UniformType, element::PixelShaderElement
+            element::{AsRenderElements, Kind, surface::WaylandSurfaceRenderElement, texture::{TextureBuffer, TextureRenderElement}}, gles::{
+                GlesPixelProgram, GlesRenderer, GlesTexture, Uniform, UniformName, UniformType, element::PixelShaderElement
             }
         }, winit::{self, WinitEvent}
-    }, desktop::{Space, Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::calloop::EventLoop, utils::{Logical, Rectangle, Scale, Transform}
+    }, desktop::{Space, Window, layer_map_for_output}, input::pointer::{CursorIcon, CursorImageStatus}, output::{Mode, Output, PhysicalProperties, Subpixel}, reexports::{calloop::EventLoop, winit::dpi::Pixel}, utils::{Logical, Point, Rectangle, Scale, Size, Transform}
 };
+use xcursor::parser::Image;
 
 use crate::{Treewm, handlers::config::TreeWMConfig, state::{BackgroundType, CanvasWindow, TreewmElement, ViewMode}};
 
@@ -231,6 +232,30 @@ pub fn indicator_element(view_mode: ViewMode, prog: &GlesPixelProgram) -> PixelS
     )
 }
 
+pub fn draw_cursor(
+    cursor_position: Point<f64, Logical>,
+    cursor_texture: GlesTexture, 
+    renderer: &mut GlesRenderer,
+    scale: f64,
+    config: &TreeWMConfig, 
+) -> TextureRenderElement<GlesTexture> {
+    let buffer = TextureBuffer::from_texture(
+        renderer,
+        cursor_texture,
+        1,
+        Transform::Normal,
+        None,
+    );
+    TextureRenderElement::from_texture_buffer(
+        cursor_position.to_physical_precise_round(scale),
+        &buffer,
+        Some(1.0_f32),
+        None,
+        Some(Size::new(config.cursor_size[0], config.cursor_size[1])),
+        Kind::Unspecified,
+    )
+}
+
 pub fn build_render_elements(
     windows: &[CanvasWindow],
     space: &Space<Window>,
@@ -242,6 +267,8 @@ pub fn build_render_elements(
     viewport_x: f64,
     viewport_y: f64,
     config: &TreeWMConfig,
+    cursor_position: Point<f64, Logical>,
+    cursor_texture: &Option<GlesTexture>,
     renderer: &mut GlesRenderer,
     line_prog: &Option<GlesPixelProgram>, 
     solid_prog: &Option<GlesPixelProgram>,
@@ -251,6 +278,11 @@ pub fn build_render_elements(
     let mut overlays: Vec<TreewmElement> = Vec::new();
     let (focused, unfocused): (Vec<&CanvasWindow>, Vec<&CanvasWindow>) = windows.iter().partition(|cw| Some(cw.id) == focused_window_id );
     let output = space.outputs().next().unwrap().clone();
+
+    if !cursor_texture.is_none() {
+        overlays.push(TreewmElement::Texture(draw_cursor(cursor_position, cursor_texture.clone().expect("cursor image undefined"), renderer, scale, config)));
+    }
+
     for focused_window in focused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&focused_window.id) {continue;}
     
@@ -268,6 +300,7 @@ pub fn build_render_elements(
             );
         }
     }
+    
     for unfocused_window in unfocused {
         if view_mode == ViewMode::Tiling && !tiling_visible_ids.contains(&unfocused_window.id) {continue;}
         if let Some(geo) = space.element_geometry(&unfocused_window.window) {
@@ -309,5 +342,6 @@ pub fn build_render_elements(
             overlays.extend(connector_elements(windows, viewport_x, viewport_y, prog).into_iter().map(TreewmElement::Shader));
         }
     }
+
     overlays
 }

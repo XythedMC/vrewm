@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ffi::OsString, process::Command, sync::Arc, time::{Duration, Instant}};
 
 use smithay::{
-    backend::{allocator::{dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, element::surface::WaylandSurfaceRenderElement, gles::{GlesPixelProgram, GlesRenderer, element::PixelShaderElement}}, session::libseat::LibSeatSession, udev::UdevEvent},
+    backend::{allocator::{Fourcc, dmabuf::Dmabuf, gbm::{GbmAllocator, GbmDevice}}, drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmSurface, compositor::{DrmCompositor, FrameFlags}, exporter::gbm::GbmFramebufferExporter}, libinput::LibinputInputBackend, renderer::{Color32F, ImportMem, element::{surface::WaylandSurfaceRenderElement, texture::TextureRenderElement}, gles::{GlesPixelProgram, GlesRenderer, GlesTexture, element::PixelShaderElement}}, session::libseat::LibSeatSession, udev::UdevEvent},
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output, space::SpaceRenderElements},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
@@ -9,7 +9,7 @@ use smithay::{
             Display, DisplayHandle, backend::{ClientData, ClientId, DisconnectReason}, protocol::wl_surface::WlSurface
         }
     },
-    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER},
+    utils::{DeviceFd, Logical, Point, SERIAL_COUNTER, Size},
     wayland::{
         compositor::{CompositorClientState, CompositorState}, cursor_shape::CursorShapeManagerState, dmabuf::{DmabufState, ImportNotifier}, fractional_scale::FractionalScaleManagerState, output::OutputManagerState, selection::{
             data_device::DataDeviceState,
@@ -18,12 +18,15 @@ use smithay::{
     },
 };
 
+use xcursor::{CursorTheme, parser::parse_xcursor};
 use crate::{handlers::config::TreeWMConfig, renderering::build_render_elements};
 
 smithay::backend::renderer::element::render_elements! {
     pub TreewmElement <=GlesRenderer>;
     Shader = PixelShaderElement,
+    Texture = TextureRenderElement<GlesTexture>,
     Surface = WaylandSurfaceRenderElement<GlesRenderer>,
+
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -145,9 +148,14 @@ pub struct Treewm {
     pub view_mode: ViewMode,
     pub zoom: f64,
     pub gap: f64,
+
     pub config: TreeWMConfig,
     pub cursor_icon: CursorImageStatus,
     pub cursor_position: Point<f64, Logical>,
+    pub cursor_theme: CursorTheme,
+    pub current_cursor: String,
+    pub cursor_texture: Option<GlesTexture>,
+
     pub layer_surfaces: Vec<LayerSurface>,
     pub background_type: BackgroundType,
     
@@ -254,6 +262,9 @@ impl Treewm {
             config,
             cursor_icon,
             cursor_position: Point::new(0.0, 0.0),
+            cursor_theme: CursorTheme::load("default"),
+            current_cursor: String::from(""),
+            cursor_texture: None,
             layer_surfaces,
             background_type,
             tiling_visible_ids: visible_ids,
@@ -660,6 +671,30 @@ impl Treewm {
 
                 let renderer = &mut gpu_data.renderer;
 
+                if let CursorImageStatus::Named(icon) = &self.cursor_icon {
+                    if icon.name() != self.current_cursor {
+                        let path = self.cursor_theme.load_icon(icon.name()).expect("Failed to load cursor icon");
+                        let data = std::fs::read(path).unwrap();
+                        let images = parse_xcursor(&data).expect("Failed to parse xcursor file");
+                        let cursor_image = images
+                            .iter()
+                            .min_by_key(|img|(img.width as i32 - self.config.cursor_size[0]).abs()
+                        ).expect("Couldnt find cursor image with the given cursor size from the config file, change it");
+                        self.cursor_texture = Some(
+                            renderer.import_memory(
+                                &cursor_image.pixels_rgba, 
+                                Fourcc::Argb8888, 
+                                Size::new(
+                                    cursor_image.width as i32, 
+                                    cursor_image.height as i32,
+                                ), 
+                                false
+                            ).expect("Failed to export raw cursor data to the renderer")
+                        );
+                        self.current_cursor = String::from(icon.name());
+                    }
+                }
+
                 let elements = build_render_elements(
                     &self.windows,
                     &self.space,
@@ -670,7 +705,9 @@ impl Treewm {
                     self.zoom,
                     self.viewport_x,
                     self.viewport_y,
-                    &self.config, 
+                    &self.config,
+                    self.cursor_position,
+                    &self.cursor_texture,
                     renderer, 
                     &gpu_data.line_prog, 
                     &gpu_data.solid_prog, 
@@ -681,7 +718,7 @@ impl Treewm {
                     renderer, 
                     &elements, 
                     Color32F::from([clear_color[0], clear_color[1], clear_color[2], 1.0]), 
-                    FrameFlags::empty()
+                    FrameFlags::empty(),
                 ).expect("Failed to render frame");
 
                 if !render_frame_result.is_empty {

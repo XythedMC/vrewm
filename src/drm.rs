@@ -100,7 +100,7 @@ fn open_gpu(
                 GbmFramebufferExporter::new(gbm.clone(), NodeFilter::None),
                 [DrmFourcc::Xrgb8888],
                 renderer.dmabuf_formats(),
-                Size::from((state.config.cursor_size[0], state.config.cursor_size[1])),
+                Size::from((state.config.cursor_size[0] as u32, state.config.cursor_size[1] as  u32)),
                 Some(gbm.clone()),
             ) else {
                 eprintln!("Skipping ctrc {:?}", crtc);

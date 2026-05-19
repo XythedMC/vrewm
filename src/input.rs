@@ -1,7 +1,7 @@
 use smithay::{
     backend::{input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     }, session::Session},
     input::{
         keyboard::{FilterResult, Keysym},
@@ -274,7 +274,71 @@ impl Treewm {
                     self.sync_window_positions();
                 }
             }
-            InputEvent::PointerMotion { .. } => {}
+            InputEvent::PointerMotion { event, .. } => {
+                let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
+                let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
+
+                self.cursor_position += event.delta();
+                self.cursor_position.x = self.cursor_position.x.clamp(output_geo.loc.x as f64, (output_geo.loc.x + output_geo.size.w) as f64);
+                self.cursor_position.y = self.cursor_position.y.clamp(output_geo.loc.y as f64, (output_geo.loc.y + output_geo.size.h) as f64);
+
+                let serial = SERIAL_COUNTER.next_serial();
+                let keyboard = self.seat.get_keyboard().expect("Keyboard not found - this is a bug");
+                let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
+                let under = self.surface_under(self.cursor_position);
+                pointer.motion(
+                    self,
+                    under.clone(),
+                    &MotionEvent {
+                        location: self.cursor_position,
+                        serial,
+                        time: event.time_msec(),
+                    },
+                );
+                pointer.frame(self);
+                {
+                    let mut new_icon = CursorImageStatus::default_named();
+                    let px = pointer.current_location().x as i32;
+                    let py = pointer.current_location().y as i32;
+                    for window in self.windows.iter().rev() {
+                        match window_edge_at(window, px, py, self.viewport_x, self.viewport_y, self.zoom) {
+                            ResizeEdge::None => {
+                                // If the mouse is inside this window's body, we should stop checking background windows
+                                let wx = (window.canvas_x - self.viewport_x) as i32;
+                                let wy = (window.canvas_y - self.viewport_y) as i32;
+                                let ww = window.base_width as i32;
+                                let wh = window.base_height as i32;
+                                if px >= wx && px < wx + ww && py >= wy && py < wy + wh {
+                                    break;
+                                }
+                            },
+                            ResizeEdge::Top         => { new_icon = CursorImageStatus::Named(CursorIcon::NResize);  break; }
+                            ResizeEdge::Bottom      => { new_icon = CursorImageStatus::Named(CursorIcon::SResize);  break; }
+                            ResizeEdge::Left        => { new_icon = CursorImageStatus::Named(CursorIcon::WResize);  break; }
+                            ResizeEdge::TopLeft     => { new_icon = CursorImageStatus::Named(CursorIcon::NwResize); break; }
+                            ResizeEdge::BottomLeft  => { new_icon = CursorImageStatus::Named(CursorIcon::SwResize); break; }
+                            ResizeEdge::Right       => { new_icon = CursorImageStatus::Named(CursorIcon::EResize);  break; }
+                            ResizeEdge::TopRight    => { new_icon = CursorImageStatus::Named(CursorIcon::NeResize); break; }
+                            ResizeEdge::BottomRight => { new_icon = CursorImageStatus::Named(CursorIcon::SeResize); break; }
+                            _ => {}
+                        }
+                    }
+                    self.cursor_icon = new_icon;
+                }
+                if let Some((wl_surf, _)) = under {    
+                    if let Some(window) = self.windows.iter().find(|cw| {
+                        cw.window   
+                            .toplevel()
+                            .map_or(false, |t| t.wl_surface() == &wl_surf)
+                    }) {
+                        let window_id = window.id;
+                        if self.config.hover_to_focus {
+                            keyboard.set_focus(self, Some(wl_surf.clone()), serial);
+                            self.focused_window_id = Some(window_id);
+                        }
+                    }
+                }
+            }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let output = self.space.outputs().next().expect("No other monitors connected. Either went through all, or none are connected");
                 let output_geo = self.space.output_geometry(output).expect("Monitor connected but not fully configured, so geometry couldnt be drawn");
@@ -295,7 +359,6 @@ impl Treewm {
                     },
                 );
                 pointer.frame(self);
-                self.cursor_position = pointer.current_location();
                 {
                     let mut new_icon = CursorImageStatus::default_named();
                     let px = pointer.current_location().x as i32;
@@ -472,6 +535,14 @@ impl Treewm {
                 pointer.frame(self);
             }
             InputEvent::PointerAxis { event, .. } => {
+                let mods = self.seat.get_keyboard().unwrap().modifier_state();
+                let main_mod = match self.main_modifier {
+                    ModifierKey::Ctrl => mods.ctrl,
+                    ModifierKey::Alt => mods.alt,
+                    ModifierKey::Shift => mods.shift,
+                    ModifierKey::Super => mods.logo,
+                };
+
                 let source = event.source();
                 let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
                     event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.
@@ -482,7 +553,7 @@ impl Treewm {
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
-                if self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
+                if main_mod && self.view_mode == ViewMode::TreeView && vertical_amount != 0.0 {
                     let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
                     let pointer_loc = pointer.current_location();
 
@@ -503,33 +574,33 @@ impl Treewm {
                     }
                     self.sync_window_positions();
                     return;
-                }
+                } else {
+                    let mut frame = AxisFrame::new(event.time_msec()).source(source);
+                    if horizontal_amount != 0.0 {
+                        frame = frame.value(Axis::Horizontal, horizontal_amount);
+                        if let Some(discrete) = horizontal_amount_discrete {
+                            frame = frame.v120(Axis::Horizontal, discrete as i32);
+                        }
+                    }
+                    if vertical_amount != 0.0 {
+                        frame = frame.value(Axis::Vertical, vertical_amount);
+                        if let Some(discrete) = vertical_amount_discrete {
+                            frame = frame.v120(Axis::Vertical, discrete as i32);
+                        }
+                    }
+                    if source == AxisSource::Finger {
+                        if event.amount(Axis::Horizontal) == Some(0.0) {
+                            frame = frame.stop(Axis::Horizontal);
+                        }
+                        if event.amount(Axis::Vertical) == Some(0.0) {
+                            frame = frame.stop(Axis::Vertical);
+                        }
+                    }
 
-                let mut frame = AxisFrame::new(event.time_msec()).source(source);
-                if horizontal_amount != 0.0 {
-                    frame = frame.value(Axis::Horizontal, horizontal_amount);
-                    if let Some(discrete) = horizontal_amount_discrete {
-                        frame = frame.v120(Axis::Horizontal, discrete as i32);
-                    }
+                    let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
+                    pointer.axis(self, frame);
+                    pointer.frame(self);
                 }
-                if vertical_amount != 0.0 {
-                    frame = frame.value(Axis::Vertical, vertical_amount);
-                    if let Some(discrete) = vertical_amount_discrete {
-                        frame = frame.v120(Axis::Vertical, discrete as i32);
-                    }
-                }
-                if source == AxisSource::Finger {
-                    if event.amount(Axis::Horizontal) == Some(0.0) {
-                        frame = frame.stop(Axis::Horizontal);
-                    }
-                    if event.amount(Axis::Vertical) == Some(0.0) {
-                        frame = frame.stop(Axis::Vertical);
-                    }
-                }
-
-                let pointer = self.seat.get_pointer().expect("No pointer/mouse connected or found");
-                pointer.axis(self, frame);
-                pointer.frame(self);
             }
             _ => {}
         }

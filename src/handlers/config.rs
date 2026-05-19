@@ -20,7 +20,7 @@ pub struct TreeWMConfig {
     pub hover_to_focus: bool,
     pub default_terminal: String,
     pub client_side_decorations: bool,
-    pub cursor_size: [u32; 2],
+    pub cursor_size: [i32; 2],
 }
 
 pub fn read_config() -> Result<TreeWMConfig, Error>{
@@ -40,7 +40,7 @@ pub fn create_config() -> anyhow::Result<()>{
         .join("treewm.toml");
 
     let values = TreeWMConfig { 
-        main_modifier: String::from("Ctrl"),
+        main_modifier: String::from("Super"),
         gap: 80.0, 
         focused_border_color: [64, 144, 194],
         unfocused_border_color: [0, 0, 0],
